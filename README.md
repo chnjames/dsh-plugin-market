@@ -31,34 +31,50 @@ DSH 有两种常见运行方式，安装插件的命令略有不同：
 
 ### 安装
 
+> ✅ 本插件 v0.2.0 起已适配 DSH 运行时，且 `dsh.bundle.patch` 已声明——
+> **`dsh plugin add` 安装后自动挂载，无需手动编辑配置**。
+
 #### 方式 1：从 GitHub 安装（推荐）
 
 **全局安装 DSH 的用户：**
 ```bash
-dsh plugin --profile web add github:your-username/dsh-plugin-market
+dsh plugin --profile web add github:chnjames/dsh-plugin-market
 ```
 
 **使用 npx @deepseek-ai/dsh 的用户：**
 ```bash
-npx @deepseek-ai/dsh plugin --profile web add github:your-username/dsh-plugin-market
+npx @deepseek-ai/dsh plugin --profile web add github:chnjames/dsh-plugin-market
 ```
 
 #### 方式 2：克隆到本地
 
 ```bash
-git clone https://github.com/your-username/dsh-plugin-market.git
+git clone https://github.com/chnjames/dsh-plugin-market.git
 cd dsh-plugin-market
-npm install
-npm run build
+npm install        # 触发 prepare 脚本自动构建 lib/
 ```
 
-然后用本地路径安装：
+然后用本地路径安装（自动挂载）：
 ```bash
-# 全局 dsh
-dsh plugin --profile web add /path/to/dsh-plugin-market
+cd ~/.dsh/profiles/web
+pnpm add "file:/path/to/dsh-plugin-market"
+```
 
-# 或 npx
-npx @deepseek-ai/dsh plugin --profile web add /path/to/dsh-plugin-market
+> ⚠️ pnpm 默认阻止依赖的 `prepare` 构建脚本。若 `pnpm add` 时构建被拦，
+> 在 `<DSH_HOME>/profiles/web/pnpm-workspace.yaml` 的 `allowBuilds` 中加入 `dsh-plugin-market` 后重装。
+> ⚠️ 如果之前用旧路径装过（如 Downloads），先 `pnpm remove dsh-plugin-market` 再重装，避免 lockfile 残留链接旧目录。
+
+### 手动挂载（备选）
+
+若自动挂载未生效，把以下内容追加到 `<DSH_HOME>/profiles/web/cordis.patch.yml`：
+
+```yaml
+- insert:
+    - id: plugin-market
+      name: dsh-plugin-market
+      config:
+        install:
+          defaultProfile: "web"
 ```
 
 ### npx 用户的额外配置
@@ -69,12 +85,14 @@ npx @deepseek-ai/dsh plugin --profile web add /path/to/dsh-plugin-market
 插件会自动检测可用的 dsh 命令——先试全局 `dsh`，找不到就试 `npx @deepseek-ai/dsh`。大多数情况下无需额外配置。
 
 **方式 B：显式配置（推荐，更稳定）**
-在 DSH 的 `cordis.patch.yml` 中添加：
+在 DSH 的 `cordis.patch.yml` 中给插件市场行加配置：
 ```yaml
-- id: plugin.market
-  config:
-    install:
-      dshCommand: "npx @deepseek-ai/dsh"
+- insert:
+    - id: plugin-market
+      name: dsh-plugin-market
+      config:
+        install:
+          dshCommand: "npx @deepseek-ai/dsh"
 ```
 这样插件就直接用 npx 命令安装其他插件，不会每次检测。
 
@@ -96,38 +114,39 @@ npx @deepseek-ai/dsh plugin --profile web add /path/to/dsh-plugin-market
 
 ## ⚙️ 配置
 
-在 DSH 的 `cordis.patch.yml` 中可以自定义配置：
+在 DSH 的 `cordis.patch.yml` 中可以自定义配置（id/name 必须与挂载行一致）：
 
 ```yaml
-- id: plugin.market
-  name: plugin-market
-  path: dsh-plugin-market
-  config:
-    sources:
-      github:
-        enabled: true
-        topic: "dsh-plugin"
-        token: ""        # 可选：GitHub Token，提高 API 速率限制
-      npm:
-        enabled: true
-        keyword: "dsh-plugin"
-        registry: "https://registry.npmjs.org"
+- insert:
+    - id: plugin-market
+      name: dsh-plugin-market
+      config:
+        sources:
+          github:
+            enabled: true
+            topic: "dsh-plugin"
+            token: ""        # 可选：GitHub Token，提高 API 速率限制
+          npm:
+            enabled: true
+            keyword: "dsh-plugin"
+            registry: "https://registry.npmjs.org"
 
-    cache:
-      ttl: 21600           # 缓存过期时间（秒），默认 6 小时
-      autoRefresh: true    # 是否自动刷新
-      refreshInterval: 21600  # 刷新间隔（秒）
+        cache:
+          ttl: 21600           # 缓存过期时间（秒），默认 6 小时
+          autoRefresh: true    # 是否自动刷新
+          refreshInterval: 21600  # 刷新间隔（秒）
 
-    ui:
-      defaultSort: "stars"   # 默认排序: stars / updated / name
-      defaultView: "grid"    # 默认视图: grid / list
-      showRiskLevel: true    # 是否显示风险级别
-      webPort: 3789          # Web UI 端口，设为 0 禁用
+        ui:
+          defaultSort: "stars"   # 默认排序: stars / updated / name
+          defaultView: "grid"    # 默认视图: grid / list
+          showRiskLevel: true    # 是否显示风险级别
+          webPort: 3789          # Web UI 端口，设为 0 禁用
 
-    install:
-      defaultProfile: "web"   # 默认安装到哪个 profile
-      autoUpdate: false       # 是否自动更新插件
-      confirmBeforeInstall: true  # 安装前是否确认
+        install:
+          defaultProfile: "web"   # 默认安装到哪个 profile
+          autoUpdate: false       # 是否自动更新插件
+          confirmBeforeInstall: true  # 安装前是否确认
+          dshCommand: ""          # 可选：dsh 命令（如 "npx @deepseek-ai/dsh"）
 ```
 
 ## 🏗️ 架构
