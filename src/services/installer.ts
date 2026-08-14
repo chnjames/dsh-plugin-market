@@ -18,13 +18,51 @@ export class InstallerService implements IInstallerService {
   private cache: PluginCache;
   private dshClient: DshCliClient;
   private defaultProfile: string;
+  private confirmBeforeInstall: boolean;
+  private loader?: { entries?: () => Iterable<{ options?: { name?: string } }> };
   private installingPlugins: Map<string, Promise<InstallResult>> = new Map();
   private autoDetectPromise: Promise<boolean> | null = null;
 
-  constructor(cache: PluginCache, dshCommand?: string, defaultProfile: string = 'web') {
+  constructor(
+    cache: PluginCache,
+    dshCommand?: string,
+    defaultProfile: string = 'web',
+    confirmBeforeInstall: boolean = true
+  ) {
     this.cache = cache;
     this.dshClient = new DshCliClient(dshCommand);
     this.defaultProfile = defaultProfile;
+    this.confirmBeforeInstall = confirmBeforeInstall;
+  }
+
+  bindLoader(loader: { entries?: () => Iterable<{ options?: { name?: string } }> }): void {
+    this.loader = loader;
+  }
+
+  collectInstalledNames(): string[] {
+    const names: string[] = [];
+    try {
+      if (this.loader && typeof this.loader.entries === 'function') {
+        for (const entry of this.loader.entries()) {
+          const n = entry?.options?.name;
+          if (n) names.push(n);
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+    return names;
+  }
+
+  async refreshInstalledFlags(): Promise<void> {
+    const fromLoader = this.collectInstalledNames();
+    let fromCli: string[] = [];
+    try {
+      fromCli = await this.dshClient.list(this.defaultProfile);
+    } catch {
+      /* ignore */
+    }
+    this.cache.applyInstalledNames([...fromLoader, ...fromCli]);
   }
 
   /**
@@ -49,6 +87,16 @@ export class InstallerService implements IInstallerService {
    */
   async install(pluginId: string, options?: InstallOptions): Promise<InstallResult> {
     const profile = options?.profile || this.defaultProfile;
+
+    if (this.confirmBeforeInstall && !options?.confirm) {
+      return {
+        success: false,
+        pluginId,
+        needsConfirm: true,
+        error: 'Confirmation required',
+        durationMs: 0,
+      };
+    }
 
     // 确保 dsh 命令可用
     const dshAvailable = await this.ensureDshAvailable();
@@ -104,6 +152,7 @@ export class InstallerService implements IInstallerService {
         if (result.success) {
           this.cache.setInstalled(pluginId, true, plugin.version);
           this.cache.updateInstallLog(logId, 'success');
+          void this.refreshInstalledFlags();
         } else {
           this.cache.updateInstallLog(logId, 'failed', result.error);
         }
@@ -173,6 +222,7 @@ export class InstallerService implements IInstallerService {
       if (result.success) {
         this.cache.setInstalled(pluginId, false);
         this.cache.updateInstallLog(logId, 'success');
+        void this.refreshInstalledFlags();
       } else {
         // 再试一次用完整 ID
         const result2 = await this.dshClient.uninstall(pluginId, profile);

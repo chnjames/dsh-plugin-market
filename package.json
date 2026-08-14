@@ -1,7 +1,7 @@
 {
   "name": "dsh-plugin-market",
   "version": "0.3.0",
-  "description": "DSH 插件市场 — 在 DSH 内发现、浏览、安装和管理社区插件（内嵌 UI + 独立 Web UI 双形态）",
+  "description": "DSH 插件市场 — 在 DSH Web UI 内发现并一键安装社区插件，配套公开目录站",
   "type": "module",
   "main": "lib/index.js",
   "types": "lib/index.d.ts",
@@ -11,7 +11,7 @@
       "default": "./lib/index.js"
     },
     "./client": {
-      "default": "./lib/client/client.js"
+      "default": "./lib/client.js"
     },
     "./package.json": "./package.json"
   },
@@ -23,6 +23,7 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json && node scripts/build-client.mjs",
+    "build:registry": "node scripts/build-registry.mjs",
     "dev": "tsc -p tsconfig.json --watch",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "clean": "rm -rf lib",
@@ -43,9 +44,12 @@
     },
     "client": {
       "platform": "web",
+      "immediately": true,
       "inject": [
+        "@deepseek-ai/dsh-api-remotes",
         "@deepseek-ai/dsh-client-runtime",
-        "@deepseek-ai/dsh-client-locale"
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-settings"
       ]
     }
   },

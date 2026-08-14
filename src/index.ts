@@ -16,6 +16,8 @@ import { IndexingService } from './services/indexing.js';
 import { InstallerService } from './services/installer.js';
 import { PluginMarketWebServer } from './ui/web-server.js';
 import { PluginMarketService } from './remote.js';
+import { DEFAULT_CATALOG_URLS } from './utils/registry.js';
+import { excerptReadmeText } from './utils/readme.js';
 import type { PluginMarketConfig } from './types.js';
 
 /** Cordis plugin name used by loader diagnostics. */
@@ -25,6 +27,10 @@ const name = 'plugin-market';
 const inject = ['tools'];
 
 const DEFAULT_CONFIG: PluginMarketConfig = {
+  catalog: {
+    urls: DEFAULT_CATALOG_URLS,
+    fallbackToSearch: true,
+  },
   sources: {
     github: {
       enabled: true,
@@ -45,6 +51,7 @@ const DEFAULT_CONFIG: PluginMarketConfig = {
     defaultSort: 'stars',
     defaultView: 'grid',
     showRiskLevel: true,
+    webPort: 0,
   },
   install: {
     defaultProfile: 'web',
@@ -74,12 +81,14 @@ async function apply(ctx: any, config: Partial<PluginMarketConfig>) {
 
   // 初始化各层
   const cache = new PluginCache(dbPath);
-  const indexing = new IndexingService(cache, mergedConfig.sources);
+  const indexing = new IndexingService(cache, mergedConfig.sources, mergedConfig.catalog);
   const installer = new InstallerService(
     cache,
     mergedConfig.install.dshCommand,
-    mergedConfig.install.defaultProfile
+    mergedConfig.install.defaultProfile,
+    mergedConfig.install.confirmBeforeInstall
   );
+  if (ctx.loader) installer.bindLoader(ctx.loader);
 
   // ---------- 服务注册 ----------
   // PluginMarketService extends TypertRemoteService（cordis Service 子类）：
@@ -114,7 +123,7 @@ async function apply(ctx: any, config: Partial<PluginMarketConfig>) {
     // 如果缓存为空或已过期，启动后台同步
     if (status.isStale || status.totalPlugins === 0) {
       ctx.logger.info('[plugin-market] Starting background sync...');
-      indexing.syncAll().then((result) => {
+        indexing.syncAll().then((result) => {
         ctx.logger.info(
           `[plugin-market] Sync complete: ${result.totalPlugins} plugins ` +
           `(${result.newPlugins} new, ${result.updatedPlugins} updated)`
@@ -122,6 +131,7 @@ async function apply(ctx: any, config: Partial<PluginMarketConfig>) {
         if (result.failedSources.length > 0) {
           ctx.logger.warn(`[plugin-market] Failed sources: ${result.failedSources.join(', ')}`);
         }
+        return installer.refreshInstalledFlags();
       }).catch((err) => {
         ctx.logger.error('[plugin-market] Sync failed:', err);
       });
@@ -138,8 +148,10 @@ async function apply(ctx: any, config: Partial<PluginMarketConfig>) {
       }, intervalMs);
     }
 
-    // 启动 Web UI 服务器（如果配置了端口）
-    const webPort = (mergedConfig as any).ui?.webPort;
+    void installer.refreshInstalledFlags();
+
+    // 启动调试用 Web UI 服务器（默认关闭；ui.webPort > 0 才开）
+    const webPort = mergedConfig.ui?.webPort;
     if (webPort) {
       webServer = new PluginMarketWebServer({
         port: webPort,
@@ -233,7 +245,7 @@ function buildTools(indexing: IndexingService, installer: InstallerService): any
       },
       output: looseObjectOutput,
       execute: async (args: any) => {
-        const result = await installer.install(args.pluginId);
+        const result = await installer.install(args.pluginId, { confirm: true });
         return result;
       },
     },
@@ -277,7 +289,7 @@ function buildTools(indexing: IndexingService, installer: InstallerService): any
           category: detail.category,
           permissionLevel: detail.permissionLevel,
           url: detail.url,
-          readme: detail.readme?.slice(0, 3000) || '暂无 README',
+          readme: excerptReadmeText(detail.readme).slice(0, 1200) || '暂无 README',
           isInstalled: detail.isInstalled,
         };
       },

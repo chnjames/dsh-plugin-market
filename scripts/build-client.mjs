@@ -1,13 +1,11 @@
 // Build the browser client half: copy src/client/index.js -> lib/client.js
-// The client bundle is already in ModuleLoader format (window.__ModuleLoader__),
-// so no bundler is required — ModuleLoader provides react and @deepseek-ai/* deps.
-import { mkdirSync, copyFileSync, existsSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const src = join(here, '..', 'src', 'client', 'index.js');
-const outDir = join(here, '..', 'lib', 'client');
+const outDir = join(here, '..', 'lib');
 const out = join(outDir, 'client.js');
 
 if (!existsSync(src)) {
@@ -16,4 +14,16 @@ if (!existsSync(src)) {
 }
 mkdirSync(outDir, { recursive: true });
 copyFileSync(src, out);
+
+const legacyClientDir = join(outDir, 'client');
+mkdirSync(legacyClientDir, { recursive: true });
+copyFileSync(src, join(legacyClientDir, 'client.js'));
+
+const snapshotSrc = join(here, '..', 'website', 'public', 'registry.json');
+const snapshotOut = join(outDir, 'registry.snapshot.json');
+if (existsSync(snapshotSrc)) {
+  copyFileSync(snapshotSrc, snapshotOut);
+  console.log(`client build: snapshot ${snapshotSrc} -> ${snapshotOut}`);
+}
+
 console.log(`client build: ${src} -> ${out}`);

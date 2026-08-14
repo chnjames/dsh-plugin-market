@@ -1,296 +1,204 @@
 # DSH 插件市场 · 审计与自检报告
 
-> 项目：dsh-plugin-market v0.1.0
-> 审计时间：2026-08-14
-> 审计范围：全部源码 + 配置 + 文档
+> 项目：dsh-plugin-market **v0.3.0**  
+> 审计时间：2026-08-14  
+> 范围：Host（Typert Remote）+ 浏览器 Client（设置 Tab）+ 共享分类器 + 公开目录站 + README 展示 + 风险启发式  
+> 方法：读源码、对 1125 条 `registry.json` 全量重打分、对照旧规则统计误报
+
+本报告记录的是**当前实现的真实状态**，不是愿望清单。旧版 v0.1 报告（独立 overlay、better-sqlite3、`ctx.service`）已经过时。
 
 ---
 
-## 一、代码质量
+## 1. 当前架构（事实）
 
-### 1.1 代码统计
+共享一份 CI 生成的 `website/public/registry.json`：
 
-| 指标 | 数值 |
-|------|------|
-| TypeScript 源文件 | 10 个 |
-| 代码总行数 | 3518 行 |
-| 类型定义 | 300+ 行 |
-| 注释覆盖率 | ~15% |
-| 模块分层 | 4 层（db / services / utils / ui） |
+| 面 | 入口 | 职责 |
+|---|---|---|
+| CI | `.github/workflows/registry.yml` + `scripts/build-registry.mjs` | 爬 `topic:dsh-plugin` / npm keyword，写入目录 |
+| 网站 | `website/` Next.js `output: 'export'` | 浏览、复制 `dsh plugin add`，**不在浏览器里安装** |
+| DSH 插件 | 设置 → 插件 → **插件市场** Tab（`settings.plugins.tab`，id `market`，order 20） | 搜索、展开详情、确认后走官方 CLI 安装 |
 
-### 1.2 代码结构评分
+Host 侧 `PluginMarketService` 继承 `TypertRemoteService`，`super(ctx, 'pluginMarket')`，方法用 `@Remote`。浏览器半先 `$mount` contribution，再在嵌套 fiber 里 `inject` `remote.pluginMarket`。React **不**直接碰 `ctx.remote`。
 
-| 维度 | 评分 | 说明 |
-|------|------|------|
-| 模块化 | ⭐⭐⭐⭐⭐ | 清晰的分层架构，职责分离明确 |
-| 类型安全 | ⭐⭐⭐⭐ | 完整的 TypeScript 类型定义，strict 模式 |
-| 错误处理 | ⭐⭐⭐⭐ | 关键路径有 try-catch，错误向上传递 |
-| 可维护性 | ⭐⭐⭐⭐ | 命名规范、结构清晰、注释充分 |
-| 可测试性 | ⭐⭐⭐ | 服务层可单独测试，但 UI 层耦合较重 |
+安装 wire 名是 **`installPlugin`**，不能叫 `install`：客户端 `RemoteNamespaceService` 已占用 `install()`。
 
-### 1.3 潜在问题
+目录拉取顺序：Vercel → jsDelivr → GitHub raw → 包内 `lib/registry.snapshot.json` → 最后才回落到本机 GitHub/npm 搜索。
 
-1. **`console` 直接使用** — 目前直接用 `console.info/warn/error`，建议封装 Logger 类
-2. **Web UI 字符串拼接** — HTML 模板中用了大量模板字符串，存在 XSS 风险（已用 `escapeHtml` 缓解）
-3. **长轮询 vs WebSocket** — 安装状态通过轮询获取，后续可改用 WebSocket 或 SSE
-4. **没有单元测试** — MVP 阶段暂缺，后续需要补充
+调试 HTTP 面板 `src/ui/web-server.ts` 仍保留，默认 `ui.webPort: 0` **关闭**。产品入口不是侧栏按钮，也不是独立站点上的「一键安装」。
 
 ---
 
-## 二、功能完整性
+## 2. README 展示：问题与处理
 
-### 2.1 MVP 功能清单
+### 2.1 原来为什么乱
 
-| 功能 | 状态 | 说明 |
-|------|------|------|
-| GitHub 插件索引 | ✅ 完成 | topic 搜索、分页拉取、元数据提取 |
-| npm 插件索引 | ✅ 完成 | 关键词搜索、去重 |
-| 分类自动推断 | ✅ 完成 | 12 个分类，关键词匹配打分 |
-| 风险级别推断 | ✅ 完成 | 5 级风险，启发式规则 |
-| 本地缓存 (SQLite) | ✅ 完成 | better-sqlite3，WAL 模式 |
-| 自动刷新 | ✅ 完成 | 6 小时间隔，启动时检查 |
-| 插件搜索 | ✅ 完成 | 名称/描述/关键词/作者 |
-| 分类筛选 | ✅ 完成 | 12 个分类 + 全部 |
-| 排序 | ✅ 完成 | 热度/更新时间/名称 |
-| 分页 | ✅ 完成 | 服务端分页 |
-| 插件详情 | ✅ 完成 | README 拉取 + 元数据展示 |
-| 一键安装 | ✅ 完成 | 调用 `dsh plugin add` |
-| 一键卸载 | ✅ 完成 | 调用 `dsh plugin remove` |
-| 安装状态追踪 | ✅ 完成 | 缓存标记 + 安装中状态 |
-| 安装日志 | ✅ 完成 | SQLite 记录 |
-| Web UI 面板 | ✅ 完成 | 独立 HTTP 服务器，响应式设计 |
-| Agent 工具注册 | ✅ 完成 | 4 个工具：搜索/安装/已安装/详情 |
-| Cordis 服务注册 | ✅ 完成 | ctx.service('pluginMarket', ...) |
-| 配置 Schema | ✅ 完成 | 完整的默认配置 + 可覆盖 |
-| README 文档 | ✅ 完成 | 安装/配置/架构/开发指南 |
+GitHub README 通常是徽章墙 + HTML 居中图 + 表格 + ASCII + 安装章节。旧 UI 把原文丢进卡片里的 `<pre>`（约 360px 双列、`max-height: 28vh`）。结果是：
 
-### 2.2 已知限制
+- 徽章 Markdown（`[![...](...)`]）铺满屏幕
+- 表格 `| col | col |` 挤成乱码
+- 和插件同名的 `# Title` 重复出现
+- Host 可能下发整份 README（现已截断 12k，抓取上限 20k）
 
-1. **DSH Web UI 原生注入** — 当前是独立 Web 面板（端口 3789），而非注入到 DSH 原生界面中。原因是 DSH 的 UI 注入 API 未公开文档，需要参考社区插件（如 dsh-better-sidebar）的实现方式。
-2. **安装命令依赖 dsh CLI** — 需要 dsh 在 PATH 中可用
-3. **GitHub API 速率限制** — 未认证 10 次/分钟，全量同步可能触发限制；建议配置 Token
-4. **npm 下载量统计** — MVP 阶段未实现，默认 0
-5. **没有插件更新检测** — 只能手动卸载重装
-6. **Markdown 渲染简陋** — 详情页的 README 只做了基础转换，不支持完整 Markdown
+这不是「Markdown 渲染不够炫」，是**在设置面板里放错了信息密度**。
+
+### 2.2 现在的页面结构
+
+展开一张卡片，自上而下：
+
+1. 标识：`github:owner/repo`
+2. 事实行：作者 / 星标 / 许可 / **仅当有启发式结果时**才出现「提示」
+3. 说明：剥掉 frontmatter、注释、徽章、图片、HTML、表格、安装/许可证标题后的 **摘要段落**（约 640 字、最多 6 块）
+4. 「在仓库中阅读完整 README」
+5. 操作：打开仓库 / 安装（先确认）
+
+列表态只保留：名称、两行描述、已安装标记、星标。不再在折叠卡片上堆英文 `high`/`medium`。
+
+公开站详情页同样改成段落摘要 + 仓库链接，而不是 `pre-wrap` 原文。卡片上「未评估」不再当标签刷屏（1125 条里绝大多数都是未评估）。
+
+### 2.3 仍未做、也不该做的
+
+设置 Tab **不会**上完整 Markdown 渲染器（GFM / mermaid / HTML）。那会把设置页变成文档站，且有 XSS 面。完整文档的正确位置是仓库。
+
+Client 里的 `excerptReadme` 与 Host `src/utils/readme.ts` 是两份相近实现，存在漂移风险。Agent 工具走 Host 摘要（1200 字）。
 
 ---
 
-## 三、类型安全
+## 3. 风险等级：逻辑是否合理
 
-### 3.1 TypeScript 配置
+### 3.1 结论（先说清楚）
 
-- ✅ `strict: true` — 严格模式
-- ✅ `noImplicitAny` — 禁止隐式 any
-- ✅ `strictNullChecks` — 空值检查
-- ✅ `NodeNext` 模块解析 — 符合 ESM 规范
-- ✅ `declaration + declarationMap` — 生成类型声明
+**旧逻辑不合理。** 字段名叫 `permissionLevel`，实际**不是**权限审计、不是静态分析、不是沙箱 profile。它只是对名称/描述/topics/keywords 做关键词匹配。
 
-### 3.2 类型覆盖
+安装第三方插件 = 在本机执行其代码。真正的控制是：**默认不装、装前确认、走官方 `dsh plugin add`、文案写明「目录不是推荐」**。启发式最多做弱提示。
 
-| 模块 | 类型覆盖 | 备注 |
-|------|----------|------|
-| types.ts | 100% | 所有核心接口都有定义 |
-| db/cache.ts | 95% | 数据库行用 any 中转，进出都有类型 |
-| services/indexing.ts | 90% | 实现了 IIndexingService 接口 |
-| services/installer.ts | 90% | 实现了 IInstallerService 接口 |
-| utils/* | 85% | API 返回类型基本覆盖 |
-| ui/web-server.ts | 70% | 前端模板是字符串，类型检查不到 |
-| index.ts | 90% | Cordis ctx 用了 any（API 未确认） |
+因此默认值必须是 **`unknown`（未评估）**，并且 UI 不能把「未评估」画成一种安全结论。
 
-### 3.3 类型风险点
+### 3.2 旧规则如何失效（全量 1125 条）
 
-1. **`ctx: any`** — Cordis/DSH 的上下文类型未确认，用了 any。这是 DSH 插件的常见做法，因为官方类型定义可能变动。
-2. **数据库行 `any`** — `better-sqlite3` 的查询结果默认 any，在进出层做了类型转换。
-3. **前端模板** — HTML 内联脚本无法被 TypeScript 检查。
+旧实现是 `String.includes` 子串匹配，先命中 `high` 即返回。典型误报：
 
----
+| 词 | 误伤 |
+|---|---|
+| `git` | GitHub |
+| `system` | design-systems |
+| `auth` | author |
+| `read` | readme |
+| `web` / `ui` | 几乎所有 Web 主题 |
+| `shell` | “desktop shell / WebView shell” |
+| `exec` / `execute` / `eval` | “execute tasks”、`dsh-eval-regression` |
+| `upload` / `download` | 图床、拖放、主题上传背景图 |
 
-## 四、错误处理
+当时分布大约是：high 273 · medium 317 · low 93 · safe 3 · unknown 439。超过一半被标成中高风险，标签失去区分度；`safe` 几乎不可达。
 
-### 4.1 错误处理覆盖
+### 3.3 现行规则
 
-| 场景 | 处理方式 | 评分 |
-|------|----------|------|
-| GitHub API 失败 | try-catch + 日志 + 部分失败不影响整体 | ⭐⭐⭐⭐ |
-| npm API 失败 | 同上 | ⭐⭐⭐⭐ |
-| 安装命令失败 | 捕获错误 + 记录日志 + 返回失败结果 | ⭐⭐⭐⭐ |
-| 数据库操作失败 | 未做全局 try-catch，依赖上层 | ⭐⭐⭐ |
-| HTTP 请求失败 | 前端有错误提示 | ⭐⭐⭐⭐ |
-| 插件不存在 | 返回 null / 404 | ⭐⭐⭐⭐ |
-| 重复安装 | Map 去重 + Promise 复用 | ⭐⭐⭐⭐⭐ |
+英文用**词边界**（`git` ≠ `github`）；中文仍用子串。
 
-### 4.2 改进建议
+| 级别 | 何时 | 词表 |
+|---|---|---|
+| **high** | 任意字段 | `sudo` `password` `secret` `keylogger` `filesystem` |
+| **high** | 仅名称 / topics / keywords | `bash` `ssh` `credential` `spawn` |
+| **safe** | 仅名称 / topics / keywords | `theme` `skin` `sticker` `emoji` `cosmetic` |
+| **medium** | 任意字段 | `scrape` `crawl`（当前目录 0 条） |
+| **unknown** | 其余 | 默认 |
 
-1. 数据库操作增加统一的错误处理包装
-2. 增加错误重试机制（指数退避）
-3. 增加熔断机制（连续失败后暂停请求）
+`shell` / `exec` / `eval` / `upload` 已删除：描述文案噪声大于信号。外观类放在 medium 之前，避免「主题 + 上传背景」被标成需注意。
 
----
+`low` 仍留在类型里以兼容旧缓存，**生成路径不再写出**。
 
-## 五、资源管理
+### 3.4 重打分结果（同一份 1125 条目录）
 
-### 5.1 资源清理
+| 版本 | high | medium | safe | unknown |
+|---|---:|---:|---:|---:|
+| 子串 includes | 273 | 317 | 3 | 439（另有 low 93） |
+| 词边界 + 宽词表 | 47 | 7 | 34 | 1037 |
+| **现行（身份字段收紧）** | **18** | **0** | **29** | **1078** |
 
-| 资源 | 清理方式 | 状态 |
-|------|----------|------|
-| SQLite 连接 | `ctx.on('dispose')` 中 `cache.close()` | ✅ |
-| HTTP 服务器 | 未在 dispose 中关闭 | ⚠️ |
-| 定时器 | 未清理（setInterval） | ⚠️ |
-| 子进程 | 由 dsh CLI 自行管理 | ✅ |
-| 内存缓存 | 无内存缓存，全部走 SQLite | ✅ |
+现行 high（18）大体可解释：bash/ssh 工具、凭据/密码、filesystem、安全扫描技能包、远程访问。safe（29）基本是皮肤/主题。
 
-### 5.2 内存使用
+### 3.5 仍存在的误报 / 漏报（必须承认）
 
-- 插件元数据全部存在 SQLite，不常驻内存
-- Web UI 模板是静态字符串，约 20KB
-- 每次搜索查询数据库，结果即时返回，不累积
-- 预估内存占用：< 50MB（含 SQLite 缓存）
+**误报（high 里仍有噪声）：**
 
----
+- `dsh-repro`：描述写 `secret-scrubbed`（在洗敏感信息，不是在管密钥）
+- `dsh-tool-monitor`：身份字段带 `bash`，实际是监视已有任务
+- `deepseek-harness-lan`：topic 含 `bash`
 
-## 六、安全评估
+**漏报（unknown，但能力并不「普通」）：**
 
-### 6.1 安全风险
+- `dsh-plugin-interpreters`：名称是 `interpreters` 复数，匹配不到 `interpreter`；会跑 Python/Node
+- 各类 Electron / Wails / WebView **桌面壳**：不再因 “shell” 报警，但它们确实有 OS 能力
+- 只在中文描述里写「执行代码」、名称完全中性的插件
 
-| 风险项 | 级别 | 说明 | 缓解措施 |
-|--------|------|------|----------|
-| XSS（跨站脚本） | 中 | README 内容可能包含恶意脚本 | 使用 `escapeHtml` 转义；Markdown 转换只处理基础语法 |
-| 命令注入 | 低 | 安装命令通过 `execFile` 传递数组参数 | `execFile` 数组参数不会触发 shell 解析 |
-| 路径遍历 | 低 | 数据库路径来自环境变量 | 路径拼接用 `path.join` |
-| SSRF | 低 | 只请求 GitHub 和 npm 官方 API | 硬编码 API 地址，用户不可控 |
-| 插件安装风险 | 高 | 第三方插件可能包含恶意代码 | 风险级别提示 + 免责声明 + 用户确认 |
-| 信息泄露 | 低 | 缓存数据存在本地 | 只存储公开元数据，不存敏感信息 |
+没有源码审计之前，漏报是常态。把漏报全部用更宽的词补回去，会回到「一半目录都是高风险」。
 
-### 6.2 安全最佳实践
+### 3.6 产品含义
 
-- ✅ 使用 `execFile` 而非 `exec`（避免 shell 注入）
-- ✅ 前端输出全部 HTML 转义
-- ✅ 数据库用参数化查询（better-sqlite3 默认支持）
-- ✅ 不收集用户数据
-- ✅ 本地存储，不上传任何信息
-- ⚠️ 缺少 CSP（内容安全策略）— 后续可加
-- ⚠️ 缺少 Rate Limiting — 本地服务，风险较低
+| 该做 | 不该做 |
+|---|---|
+| 未评估不展示标签 | 把标签当成「已审计 / 安全」 |
+| 高权限提示用克制文案 | 在每张卡片上重复长免责声明 |
+| 安装确认 + 官方 CLI | 假装能从 README 推断权限集 |
+
+公开站与 DSH Tab 现在都：**未评估不打标；外观类 / 高权限提示才出现。**
 
 ---
 
-## 七、性能估算
+## 4. 其它自检项
 
-### 7.1 关键操作耗时预估
+### 4.1 通过
 
-| 操作 | 预估耗时 | 说明 |
-|------|----------|------|
-| 首次全量同步 | 10-30 秒 | GitHub 搜索 10 页 + npm 搜索 + 分类推断 |
-| 增量同步 | 5-10 秒 | 同上，但数据量可能更小 |
-| 插件搜索 | < 100ms | SQLite 查询，有索引 |
-| 分类浏览 | < 50ms | SQLite 查询，有索引 |
-| 插件详情（含 README） | 1-3 秒 | 需请求 GitHub/npm API |
-| 插件安装 | 5-30 秒 | 取决于网络和包大小 |
-| Web 页面加载 | < 1 秒 | 静态 HTML + 一次 API 请求 |
+- Client 包名 id 为 `dsh-plugin-market`，`$mount` 后再嵌套 inject `remote.pluginMarket`
+- `dsh.client.inject` 含 settings UI；入口为 `settings.plugins.tab`
+- Remote 方法无默认参数 `= {}`（Gateway 解析 `Function.toString()`）
+- 安装走 `dsh plugin add/remove`；Windows 下 `dsh`/`npx` 走 `.cmd`
+- 目录失败可回落 snapshot；`fallbackToSearch` 仍可用
+- README 上线截断（抓取 20k / Remote 12k / UI 摘要）
+- `src/utils/classifier.ts` 与 `shared/classifier.mjs` 规则已对齐（**以后改一处必须改另一处**）
+- 缓存 upsert 会覆盖 `permission_level`；同步新目录后旧 SQLite 分数会更新
 
-### 7.2 数据库性能
+### 4.2 未通过 / 已知债
 
-- 1000 个插件时，数据库大小约 2-5MB
-- 搜索查询（无索引字段 LIKE）在 1000 条数据下 < 50ms
-- 有索引的排序/筛选查询 < 10ms
-- WAL 模式下，读写不阻塞
+| 项 | 说明 |
+|---|---|
+| 无单元测试 | 分类器、README 摘要、Remote 编解码都没有自动回归 |
+| 双份 excerpt | Client JS 与 `src/utils/readme.ts` 会再漂移 |
+| `src/ui/web-server.ts` | 旧独立面板仍在树里，默认关闭，和产品 UI 重复 |
+| `src/shared/*` 与 `src/utils/*` | 分类/目录工具可能有历史重复路径 |
+| npm 下载量 | 目录里多为 0 |
+| 无更新检测 | 只能卸了再装 |
+| 本机缓存 | 用户需「同步目录」或重启后才会吃到新的风险分数 |
+| 分类 `other` | 约 40%+ 仍是 other，关键词分类同样是启发式 |
 
----
+### 4.3 安全边界（安装路径）
 
-## 八、架构合理性
+- 市场**不执行**第三方 `install.sh`
+- 确认框之后才调 CLI
+- 目录是公开索引，**不构成推荐**
+- 启发式**不能**替代你自己读仓库
 
-### 8.1 架构评分
-
-| 维度 | 评分 | 说明 |
-|------|------|------|
-| 分层清晰 | ⭐⭐⭐⭐⭐ | DB → Service → UI，职责明确 |
-| 可扩展性 | ⭐⭐⭐⭐ | 新增数据源只需实现对应 API 客户端 |
-| 可替换性 | ⭐⭐⭐⭐ | 各层通过接口解耦 |
-| 与 DSH 集成度 | ⭐⭐⭐ | 工具/服务注册到位，UI 是独立面板 |
-| 容错性 | ⭐⭐⭐⭐ | 单数据源失败不影响整体 |
-
-### 8.2 技术选型合理性
-
-| 技术 | 选择 | 合理性 |
-|------|------|--------|
-| 数据库 | sql.js | ✅ 纯 JS 实现，零编译依赖，跨平台兼容 |
-| HTTP 客户端 | fetch (Node 原生) | ✅ 零依赖，Node 18+ 原生支持 |
-| Web 服务器 | Node http 模块 | ✅ 零依赖，简单够用 |
-| 前端方案 | 原生 HTML + Vanilla JS | ✅ 零构建、轻量，MVP 阶段足够 |
-| 安装方式 | dsh CLI 子进程 | ✅ 官方支持、稳定、行为一致 |
+XSS：设置 Tab 用 React 文本节点渲染摘要，不 `dangerouslySetInnerHTML`。旧 `web-server.ts` 若被手动打开，仍是 HTML 字符串拼接（有 `escapeHtml`）。
 
 ---
 
-## 九、与设计文档一致性
+## 5. 使用侧回归清单
 
-| 设计文档项 | 实现状态 | 偏差说明 |
-|------------|----------|----------|
-| 数据源（GitHub + npm） | ✅ 一致 | - |
-| SQLite 缓存 | ✅ 一致 | - |
-| 12 个分类 | ✅ 一致 | - |
-| 5 级风险 | ✅ 一致 | - |
-| 索引服务 | ✅ 一致 | - |
-| 安装服务 | ✅ 一致 | - |
-| Web UI 面板 | ✅ 一致 | - |
-| 侧边栏 Tab 注入 | ⚠️ 部分 | 改为独立 Web 面板（DSH UI 注入 API 未确认） |
-| Agent 工具 | ✅ 一致 | 4 个工具全部实现 |
-| Cordis 服务 | ✅ 一致 | - |
-| 配置 Schema | ✅ 一致 | - |
-| 自动刷新 | ✅ 一致 | - |
+DSH 重启后：
 
-**主要偏差**：UI 注入方式从"侧边栏 Tab"改为"独立 Web 面板"。原因是 DSH 的 UI 注入 API 没有公开文档，直接注入可能因版本变化而失效。独立面板更稳定，且可以在浏览器中单独打开使用。后续可以研究社区插件（dsh-better-sidebar）的注入方式，再增加原生注入支持。
+1. 设置 → 插件 → 第三个 Tab「插件市场」
+2. 折叠卡片：名称 + 描述 + 星标，没有英文 `high`
+3. 展开主题类插件：提示为「外观类」；说明是短段落，不是徽章墙
+4. 展开普通插件：没有风险行；有「在仓库中阅读完整 README」
+5. 展开 `dsh-ssh` / `dsh-bash-encoding` 一类：出现「高权限提示」
+6. 安装仍先确认，确认后 `dsh plugin list` 能看到
+
+公开站：卡片不再刷「未评估」；详情页说明区是摘要。
 
 ---
 
-## 十、总体评价
+## 6. 总结
 
-### 评级：**Good (MVP 合格)** ✅
-
-**优点：**
-- 功能完整，MVP 核心闭环全部实现
-- 架构清晰，分层合理
-- 类型安全，代码质量较高
-- 错误处理到位，容错性好
-- **零原生依赖**（sql.js 纯 JS，所有平台直接安装）
-- 文档齐全
-
-**不足：**
-- 缺少单元测试
-- 资源清理不完整（HTTP 服务器、定时器）
-- UI 是独立面板而非 DSH 原生注入
-- 没有插件更新检测
-- 安全防护可以进一步加强
-
-**建议：**
-1. 可以发布 MVP 版本供用户试用
-2. 后续迭代优先补充：DSH 原生 UI 注入、插件更新检测、单元测试
-3. 收集用户反馈后再决定是否做评分/评论等社区功能
-
----
-
-## 附录：文件清单
-
-```
-dsh-plugin-market/
-├── package.json              # 包定义 + dsh.bundle
-├── cordis.yml                # DSH bundle 配置
-├── tsconfig.json             # TypeScript 配置
-├── .gitignore                # Git 忽略
-├── README.md                 # 用户文档（~300 行）
-└── src/
-    ├── index.ts              # 插件入口（200 行）
-    ├── types.ts              # 类型定义（300 行）
-    ├── db/
-    │   └── cache.ts          # SQLite 缓存层（~500 行）
-    ├── services/
-    │   ├── indexing.ts       # 索引服务（~400 行）
-    │   └── installer.ts      # 安装服务（~250 行）
-    ├── ui/
-    │   └── web-server.ts     # Web UI 服务器（含 HTML 模板，~1500 行）
-    └── utils/
-        ├── github-api.ts     # GitHub API 封装（~120 行）
-        ├── npm-api.ts        # npm API 封装（~100 行）
-        ├── classifier.ts     # 分类与风险推断（~180 行）
-        └── dsh-cli.ts        # dsh 命令封装（~120 行）
-
-合计：3518 行 TypeScript，10 个源文件
-```
+- **UI**：设置面板按「列表 → 元数据 → 摘要 → 仓库」分层后，README 可读；完整文档不该塞进 Tab。
+- **风险**：旧 5 级子串匹配**不合理**。现行默认未评估、少标、把身份字段和描述文案分开，分布才像提示而不是噪声。它仍然**不是审计**。
+- **真正的安全模型**：确认安装 + 官方 CLI + 用户自己信任来源。启发式只是弱信号。

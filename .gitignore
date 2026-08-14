@@ -1,5 +1,5 @@
 node_modules/
-lib/
+/lib/
 *.log
 npm-debug.log*
 .vscode/
@@ -12,3 +12,6 @@ Thumbs.db
 .env.local
 *.db
 *.sqlite
+website/node_modules/
+website/.next/
+website/out/

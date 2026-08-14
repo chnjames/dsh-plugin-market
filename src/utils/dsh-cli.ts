@@ -2,8 +2,14 @@
 // DSH Plugin Market - DSH CLI Wrapper
 // ============================================================
 
-import { execFile, spawn } from 'node:child_process';
-import type { InstallResult, UninstallResult, UpdateResult } from '../types.js';
+import { execFile } from 'node:child_process';
+import type { InstallResult, UninstallResult } from '../types.js';
+
+function winBin(cmd: string): string {
+  if (process.platform !== 'win32') return cmd;
+  if (cmd === 'dsh' || cmd === 'npx' || cmd === 'npm' || cmd === 'pnpm') return `${cmd}.cmd`;
+  return cmd;
+}
 
 export class DshCliClient {
   private dshCommand: string;
@@ -11,31 +17,23 @@ export class DshCliClient {
 
   constructor(dshCommand?: string) {
     if (dshCommand) {
-      // 用户显式指定了命令
       this.dshCommand = dshCommand;
       this.useNpx = dshCommand.startsWith('npx');
     } else {
-      // 自动检测：先试全局 dsh，不行就用 npx
       this.dshCommand = 'dsh';
       this.useNpx = false;
     }
   }
 
-  /**
-   * 自动检测可用的 dsh 命令
-   * 优先使用全局 dsh，如果不可用则回退到 npx @deepseek-ai/dsh
-   */
   async autoDetect(): Promise<boolean> {
-    // 先检查全局 dsh
-    const available = await this.checkCommand('dsh', ['--version']);
+    const available = await this.checkCommand(winBin('dsh'), ['--version']);
     if (available) {
       this.dshCommand = 'dsh';
       this.useNpx = false;
       return true;
     }
 
-    // 再试 npx
-    const npxAvailable = await this.checkCommand('npx', ['@deepseek-ai/dsh', '--version']);
+    const npxAvailable = await this.checkCommand(winBin('npx'), ['@deepseek-ai/dsh', '--version']);
     if (npxAvailable) {
       this.dshCommand = 'npx';
       this.useNpx = true;
@@ -45,35 +43,33 @@ export class DshCliClient {
     return false;
   }
 
-  /**
-   * 检查某个命令是否可用
-   */
   private async checkCommand(cmd: string, args: string[]): Promise<boolean> {
     return new Promise((resolve) => {
-      const child = execFile(
-        cmd,
-        args,
-        { timeout: 15000, maxBuffer: 1024 * 1024 },
-        (error) => {
-          resolve(!error);
-        }
-      );
+      execFile(cmd, args, { timeout: 15000, maxBuffer: 1024 * 1024, windowsHide: true }, (error) => {
+        resolve(!error);
+      });
     });
   }
 
-  /**
-   * 执行 dsh 命令并返回输出
-   */
+  private resolveExec(): { cmd: string; prefix: string[] } {
+    if (this.useNpx) {
+      return { cmd: winBin('npx'), prefix: ['@deepseek-ai/dsh'] };
+    }
+    if (this.dshCommand.startsWith('npx')) {
+      return { cmd: winBin('npx'), prefix: ['@deepseek-ai/dsh'] };
+    }
+    return { cmd: winBin(this.dshCommand), prefix: [] };
+  }
+
   private async exec(args: string[], timeoutMs: number = 60000): Promise<{ stdout: string; stderr: string; exitCode: number }> {
-    // 如果用 npx，需要在 args 前面加上 @deepseek-ai/dsh
-    const actualArgs = this.useNpx ? ['@deepseek-ai/dsh', ...args] : args;
-    const actualCmd = this.dshCommand;
+    const { cmd, prefix } = this.resolveExec();
+    const actualArgs = [...prefix, ...args];
 
     return new Promise((resolve) => {
-      const child = execFile(
-        actualCmd,
+      execFile(
+        cmd,
         actualArgs,
-        { timeout: timeoutMs, maxBuffer: 10 * 1024 * 1024 },
+        { timeout: timeoutMs, maxBuffer: 10 * 1024 * 1024, windowsHide: true },
         (error, stdout, stderr) => {
           resolve({
             stdout: stdout || '',
@@ -85,22 +81,17 @@ export class DshCliClient {
     });
   }
 
-  /**
-   * 安装插件
-   */
   async install(pluginSpec: string, profile: string = 'web'): Promise<InstallResult> {
     const startTime = Date.now();
-
     const { stdout, stderr, exitCode } = await this.exec([
       'plugin',
       '--profile',
       profile,
       'add',
       pluginSpec,
-    ]);
+    ], 180000);
 
     const success = exitCode === 0;
-
     return {
       success,
       pluginId: pluginSpec,
@@ -109,13 +100,8 @@ export class DshCliClient {
     };
   }
 
-  /**
-   * 卸载插件
-   */
   async uninstall(pluginId: string, profile: string = 'web'): Promise<UninstallResult> {
     const startTime = Date.now();
-
-    // 尝试多种方式移除
     const { stdout, stderr, exitCode } = await this.exec([
       'plugin',
       '--profile',
@@ -124,7 +110,6 @@ export class DshCliClient {
       pluginId,
     ]);
 
-    // 如果 remove 失败，试试 delete
     let success = exitCode === 0;
     let error = success ? undefined : stderr || stdout || `Exit code: ${exitCode}`;
 
@@ -150,9 +135,6 @@ export class DshCliClient {
     };
   }
 
-  /**
-   * 列出已安装插件
-   */
   async list(profile: string = 'web'): Promise<string[]> {
     const { stdout, exitCode } = await this.exec([
       'plugin',
@@ -161,18 +143,20 @@ export class DshCliClient {
       'list',
     ]);
 
-    if (exitCode !== 0) {
-      return [];
-    }
+    if (exitCode !== 0) return [];
 
-    // 解析输出（不同版本格式可能不同，尽量兼容）
-    const lines = stdout.split('\n').filter((l) => l.trim());
-    return lines;
+    return stdout
+      .split('\n')
+      .map((l) => l.trim())
+      .filter(Boolean)
+      .map((line) => {
+        const stripped = line.replace(/^[\s*•\-]+/, '');
+        const token = stripped.split(/\s+/)[0] || '';
+        return token.replace(/@[^@]+$/, '');
+      })
+      .filter((t) => t && t !== 'name' && t !== 'id' && !t.startsWith('-'));
   }
 
-  /**
-   * 检查 dsh 是否可用
-   */
   async isAvailable(): Promise<boolean> {
     try {
       const { exitCode } = await this.exec(['--version'], 5000);
@@ -182,15 +166,10 @@ export class DshCliClient {
     }
   }
 
-  /**
-   * 获取 dsh 版本
-   */
   async getVersion(): Promise<string | null> {
     try {
       const { stdout, exitCode } = await this.exec(['--version'], 5000);
-      if (exitCode === 0) {
-        return stdout.trim();
-      }
+      if (exitCode === 0) return stdout.trim();
       return null;
     } catch {
       return null;

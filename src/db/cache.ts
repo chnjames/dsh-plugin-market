@@ -8,6 +8,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import initSqlJs, { Database as SqlJsDatabase } from 'sql.js';
+import { createRequire } from 'node:module';
+import { fileURLToPath } from 'node:url';
 import type {
   Plugin,
   PluginDetail,
@@ -17,6 +19,9 @@ import type {
   PluginSource,
   RiskLevel,
 } from '../types.js';
+import { CATEGORIES } from '../utils/categories.js';
+
+const require = createRequire(import.meta.url);
 
 const SCHEMA_VERSION = 1;
 
@@ -51,7 +56,17 @@ export class PluginCache {
       fs.mkdirSync(this.dbDir, { recursive: true });
     }
 
-    const SQL = await initSqlJs();
+    let wasmPath: string | undefined;
+    try {
+      wasmPath = path.join(path.dirname(require.resolve('sql.js')), 'sql-wasm.wasm');
+    } catch {
+      try {
+        wasmPath = path.join(path.dirname(fileURLToPath(import.meta.url)), '../../node_modules/sql.js/dist/sql-wasm.wasm');
+      } catch {
+        wasmPath = undefined;
+      }
+    }
+    const SQL = await initSqlJs(wasmPath ? { locateFile: () => wasmPath! } : undefined);
 
     // 如果数据库文件存在，从文件加载
     if (fs.existsSync(this.dbPath)) {
@@ -327,8 +342,14 @@ export class PluginCache {
     // Sort
     const sortBy = options.sortBy || 'stars';
     const sortOrder = options.sortOrder || 'desc';
-    const validSortColumns = ['stars', 'updated_at', 'name', 'downloads'];
-    const sortColumn = validSortColumns.includes(sortBy) ? sortBy : 'stars';
+    const sortMap: Record<string, string> = {
+      stars: 'stars',
+      updated: 'updated_at',
+      updated_at: 'updated_at',
+      name: 'name',
+      downloads: 'downloads',
+    };
+    const sortColumn = sortMap[sortBy] || 'stars';
     const order = sortOrder === 'asc' ? 'ASC' : 'DESC';
 
     // Pagination
@@ -399,6 +420,46 @@ export class PluginCache {
     this.scheduleSave();
   }
 
+  /**
+   * Mark plugins as installed when their name / id / install spec matches a loader or CLI listing.
+   */
+  applyInstalledNames(names: string[]): void {
+    const normalized = names
+      .map((n) => n.trim().toLowerCase())
+      .filter(Boolean);
+    if (normalized.length === 0) return;
+
+    const all = this.db.exec('SELECT id, name FROM plugins');
+    if (all.length === 0) return;
+
+    const columns = all[0].columns;
+    const matches: string[] = [];
+    for (const values of all[0].values) {
+      const row = this.rowToObject(columns, values);
+      const id = String(row.id || '').toLowerCase();
+      const name = String(row.name || '').toLowerCase();
+      const hit = normalized.some((n) => {
+        const base = n.split('/').pop() || n;
+        return (
+          n === name ||
+          n === id ||
+          id === `github:${n}` ||
+          id === `npm:${n}` ||
+          id.endsWith('/' + n) ||
+          id.endsWith(':' + n) ||
+          base === name
+        );
+      });
+      if (hit) matches.push(String(row.id));
+    }
+
+    this.db.run('UPDATE plugins SET is_installed = 0');
+    for (const id of matches) {
+      this.db.run('UPDATE plugins SET is_installed = 1 WHERE id = ?', [id]);
+    }
+    this.scheduleSave();
+  }
+
   getTotalCount(): number {
     const result = this.db.exec('SELECT COUNT(*) as count FROM plugins');
     if (result.length === 0 || result[0].values.length === 0) return 0;
@@ -432,20 +493,13 @@ export class PluginCache {
   }
 
   private insertDefaultCategories(): void {
-    const categories = [
-      { id: 'tools', name: '工具增强', nameEn: 'Tools', icon: '🔧', description: '新增工具类能力' },
-      { id: 'web-ui', name: '界面美化', nameEn: 'Web UI', icon: '🎨', description: 'UI 扩展、主题、皮肤' },
-      { id: 'workflow', name: '工作流', nameEn: 'Workflow', icon: '⚙️', description: '自动化、定时、任务编排' },
-      { id: 'session', name: '会话管理', nameEn: 'Session', icon: '💬', description: '会话导入导出、分享、回退' },
-      { id: 'skills', name: '技能扩展', nameEn: 'Skills', icon: '📚', description: 'Skill 包、提示词工程' },
-      { id: 'vision', name: '视觉能力', nameEn: 'Vision', icon: '👁️', description: '图片、OCR、视觉模型' },
-      { id: 'provider', name: '能力提供者', nameEn: 'Provider', icon: '🔌', description: '模型、沙箱、存储 Provider' },
-      { id: 'integration', name: '第三方集成', nameEn: 'Integration', icon: '🔗', description: '外部平台桥接' },
-      { id: 'developer', name: '开发工具', nameEn: 'Developer', icon: '👨‍💻', description: '插件开发、调试、模板' },
-      { id: 'productivity', name: '效率工具', nameEn: 'Productivity', icon: '⚡', description: '通知、快捷操作' },
-      { id: 'entertainment', name: '娱乐摸鱼', nameEn: 'Entertainment', icon: '🎮', description: '游戏、贴纸、趣味插件' },
-      { id: 'other', name: '其他', nameEn: 'Other', icon: '📦', description: '无法归类的插件' },
-    ];
+    const categories = CATEGORIES.map((c) => ({
+      id: c.id,
+      name: c.name,
+      nameEn: c.nameEn,
+      icon: '',
+      description: c.description,
+    }));
 
     const stmt = this.db.prepare(
       'INSERT OR IGNORE INTO categories (id, name, name_en, icon, description) VALUES (?, ?, ?, ?, ?)'

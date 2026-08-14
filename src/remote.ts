@@ -62,6 +62,7 @@ export interface MarketSearchResponse {
 export interface PluginActionRequest {
   pluginId: string;
   profile?: string;
+  confirm?: boolean;
 }
 
 /**
@@ -70,6 +71,8 @@ export interface PluginActionRequest {
  * marked with `@Remote` is callable from the browser via `ctx.remote.pluginMarket`.
  */
 export class PluginMarketService extends TypertRemoteService {
+  static inject = ['tools'];
+
   private indexing: IndexingService;
   private installer: InstallerService;
   private config: PluginMarketConfig;
@@ -84,6 +87,11 @@ export class PluginMarketService extends TypertRemoteService {
     this.config = config;
     this.indexing = indexing;
     this.installer = installer;
+  }
+
+  /** Drop `undefined` / non-JSON values so Gateway SRC `assertJsonValue` accepts the result. */
+  private toWire<T>(value: T): T {
+    return JSON.parse(JSON.stringify(value)) as T;
   }
 
   /** Project one cached Plugin into its wire-safe list shape. */
@@ -127,63 +135,65 @@ export class PluginMarketService extends TypertRemoteService {
   // ---------- indexing ----------
 
   @Remote('search')
-  async search(request: MarketSearchRequest = {}): Promise<MarketSearchResponse> {
-    const sortBy = (request.sortBy === 'stars' || request.sortBy === 'updated' ||
-      request.sortBy === 'name' || request.sortBy === 'downloads') ? request.sortBy : 'stars';
-    const result = await this.indexing.search(request.query || '', {
-      category: request.category,
+  async search(request?: MarketSearchRequest): Promise<MarketSearchResponse> {
+    // SRC gateway parses Function.toString(); no default params / destructuring.
+    const req = request || {};
+    const sortBy = (req.sortBy === 'stars' || req.sortBy === 'updated' ||
+      req.sortBy === 'name' || req.sortBy === 'downloads') ? req.sortBy : 'stars';
+    const result = await this.indexing.search(req.query || '', {
+      category: req.category,
       sortBy,
-      sortOrder: request.sortOrder,
-      page: request.page,
-      pageSize: request.pageSize || 50,
-      installedOnly: request.installedOnly,
-      riskLevel: request.riskLevel as RiskLevel | undefined,
-      source: request.source as PluginSource | undefined,
+      sortOrder: req.sortOrder,
+      page: req.page,
+      pageSize: req.pageSize || 50,
+      installedOnly: req.installedOnly,
+      riskLevel: req.riskLevel as RiskLevel | undefined,
+      source: req.source as PluginSource | undefined,
     });
-    return {
+    return this.toWire({
       plugins: result.plugins.map((p) => this.toListItem(p)),
       total: result.total,
-    };
+    });
   }
 
   @Remote('detail')
   async detail(request: { pluginId: string }): Promise<PluginDetailItem | null> {
     const d = await this.indexing.getDetail(request.pluginId);
     if (!d) return null;
-    return {
+    return this.toWire({
       ...this.toListItem(d),
-      readme: d.readme || '',
+      readme: (d.readme || '').slice(0, 12000),
       homepage: d.homepage,
       repository: d.repository,
-    };
+    });
   }
 
   @Remote('categories')
   async categories(): Promise<Array<{ id: string; name: string; nameEn?: string; icon?: string; pluginCount: number }>> {
-    return this.indexing.getCategories();
+    return this.toWire(await this.indexing.getCategories());
   }
 
   @Remote('trending')
-  async trending(request: { limit?: number } = {}): Promise<PluginListItem[]> {
-    const items = await this.indexing.getTrending(request.limit || 20);
-    return items.map((p) => this.toListItem(p));
+  async trending(request?: { limit?: number }): Promise<PluginListItem[]> {
+    const items = await this.indexing.getTrending((request && request.limit) || 20);
+    return this.toWire(items.map((p) => this.toListItem(p)));
   }
 
   @Remote('recent')
-  async recent(request: { limit?: number } = {}): Promise<PluginListItem[]> {
-    const items = await this.indexing.getRecent(request.limit || 20);
-    return items.map((p) => this.toListItem(p));
+  async recent(request?: { limit?: number }): Promise<PluginListItem[]> {
+    const items = await this.indexing.getRecent((request && request.limit) || 20);
+    return this.toWire(items.map((p) => this.toListItem(p)));
   }
 
   @Remote('status')
   async status(): Promise<any> {
-    return this.statusSnapshot();
+    return this.toWire(await this.statusSnapshot());
   }
 
   @Remote('sync')
   async sync(): Promise<any> {
     const result = await this.indexing.syncAll();
-    return {
+    return this.toWire({
       success: result.success,
       totalPlugins: result.totalPlugins,
       newPlugins: result.newPlugins,
@@ -191,32 +201,36 @@ export class PluginMarketService extends TypertRemoteService {
       failedSources: result.failedSources,
       durationMs: result.durationMs,
       error: result.error ?? null,
-    };
+    });
   }
 
   // ---------- installer ----------
 
-  @Remote('install')
-  async install(request: PluginActionRequest): Promise<any> {
-    const result = await this.installer.install(request.pluginId, { profile: request.profile });
-    return result;
+  // Wire name cannot be `install`: Client RemoteNamespaceService already has install().
+  @Remote('installPlugin')
+  async installPlugin(request: PluginActionRequest): Promise<any> {
+    const result = await this.installer.install(request.pluginId, {
+      profile: request.profile,
+      confirm: request.confirm,
+    });
+    return this.toWire(result);
   }
 
   @Remote('uninstall')
   async uninstall(request: PluginActionRequest): Promise<any> {
     const result = await this.installer.uninstall(request.pluginId, { profile: request.profile });
-    return result;
+    return this.toWire(result);
   }
 
   @Remote('update')
   async update(request: PluginActionRequest): Promise<any> {
     const result = await this.installer.update(request.pluginId, { profile: request.profile });
-    return result;
+    return this.toWire(result);
   }
 
   @Remote('installed')
   async installed(): Promise<Array<{ id: string; name: string; version: string; source: string; profile: string }>> {
-    return this.installer.getInstalled();
+    return this.toWire(await this.installer.getInstalled());
   }
 
   @Remote('statusOf')

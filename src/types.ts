@@ -37,7 +37,7 @@ export interface Plugin {
   keywords: string[];
   readmeUrl?: string;
   installCmd: string;
-  permissionLevel: RiskLevel;
+  permissionLevel: RiskLevel; // heuristic hint only — not a permission audit
   compatibility?: string;
   updatedAt: string;             // ISO 8601
   cachedAt: string;              // ISO 8601
@@ -64,6 +64,7 @@ export interface InstallResult {
   version?: string;
   error?: string;
   durationMs: number;
+  needsConfirm?: boolean;
 }
 
 export interface UninstallResult {
@@ -141,6 +142,10 @@ export interface InstallOptions {
 
 // ---------- 配置 ----------
 export interface PluginMarketConfig {
+  catalog: {
+    urls: string[];
+    fallbackToSearch: boolean;
+  };
   sources: {
     github: {
       enabled: boolean;
@@ -162,6 +167,7 @@ export interface PluginMarketConfig {
     defaultSort: string;
     defaultView: string;
     showRiskLevel: boolean;
+    webPort?: number;
   };
   install: {
     defaultProfile: string;

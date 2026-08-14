@@ -1,11 +1,16 @@
 // ============================================================
 // DSH Plugin Market - Indexing Service
+// Catalog-first: fetch shared registry.json, then optional GitHub/npm fallback.
 // ============================================================
 
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { PluginCache } from '../db/cache.js';
 import { GitHubApiClient, type GitHubRepo } from '../utils/github-api.js';
 import { NpmApiClient, type NpmPackage } from '../utils/npm-api.js';
 import { classifyPlugin, inferRiskLevel } from '../utils/classifier.js';
+import { DEFAULT_CATALOG_URLS } from '../utils/registry.js';
 import type {
   Plugin,
   PluginDetail,
@@ -14,35 +19,34 @@ import type {
   CacheStatus,
   SearchOptions,
   IIndexingService,
-  PluginSource,
+  PluginMarketConfig,
 } from '../types.js';
+import type { PluginRegistry, RegistryPlugin } from '../utils/registry.js';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export class IndexingService implements IIndexingService {
   private cache: PluginCache;
   private githubClient: GitHubApiClient;
   private npmClient: NpmApiClient;
-  private config: {
-    github: { enabled: boolean; topic: string; token?: string };
-    npm: { enabled: boolean; keyword: string; registry: string };
-  };
+  private config: PluginMarketConfig['sources'];
+  private catalogUrls: string[];
+  private fallbackToSearch: boolean;
   private syncInProgress = false;
 
   constructor(
     cache: PluginCache,
-    config: {
-      github: { enabled: boolean; topic: string; token?: string };
-      npm: { enabled: boolean; keyword: string; registry: string };
-    }
+    config: PluginMarketConfig['sources'],
+    catalog?: PluginMarketConfig['catalog']
   ) {
     this.cache = cache;
     this.config = config;
+    this.catalogUrls = catalog?.urls?.length ? catalog.urls : DEFAULT_CATALOG_URLS;
+    this.fallbackToSearch = catalog?.fallbackToSearch !== false;
     this.githubClient = new GitHubApiClient(config.github.token);
     this.npmClient = new NpmApiClient(config.npm.registry);
   }
 
-  /**
-   * 全量同步所有插件
-   */
   async syncAll(): Promise<SyncResult> {
     if (this.syncInProgress) {
       return {
@@ -58,13 +62,142 @@ export class IndexingService implements IIndexingService {
 
     this.syncInProgress = true;
     const startTime = Date.now();
-    const failedSources: string[] = [];
-    let newPlugins = 0;
-    let updatedPlugins = 0;
-
     const beforeCount = this.cache.getTotalCount();
+    const failedSources: string[] = [];
 
-    // 同步 GitHub
+    try {
+      const loaded = await this.loadRegistry();
+      if (loaded) {
+        const count = this.applyRegistry(loaded.registry);
+        const syncId = this.cache.addSyncLog(loaded.source, 'running', new Date().toISOString());
+        this.cache.finishSyncLog(syncId, 'success', count, new Date().toISOString());
+        const afterCount = this.cache.getTotalCount();
+        return {
+          success: true,
+          totalPlugins: afterCount,
+          newPlugins: Math.max(0, afterCount - beforeCount),
+          updatedPlugins: Math.max(0, Math.min(beforeCount, count)),
+          failedSources,
+          durationMs: Date.now() - startTime,
+        };
+      }
+
+      failedSources.push('catalog');
+      if (!this.fallbackToSearch) {
+        return {
+          success: false,
+          totalPlugins: this.cache.getTotalCount(),
+          newPlugins: 0,
+          updatedPlugins: 0,
+          failedSources,
+          durationMs: Date.now() - startTime,
+          error: 'Catalog unavailable',
+        };
+      }
+
+      return await this.syncFromSearchApis(startTime, beforeCount, failedSources);
+    } catch (error) {
+      return {
+        success: false,
+        totalPlugins: this.cache.getTotalCount(),
+        newPlugins: 0,
+        updatedPlugins: 0,
+        failedSources,
+        durationMs: Date.now() - startTime,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    } finally {
+      this.syncInProgress = false;
+    }
+  }
+
+  async syncIncremental(): Promise<SyncResult> {
+    return this.syncAll();
+  }
+
+  private async loadRegistry(): Promise<{ registry: PluginRegistry; source: string } | null> {
+    for (const url of this.catalogUrls) {
+      try {
+        const res = await fetch(url, {
+          headers: { 'User-Agent': 'dsh-plugin-market', Accept: 'application/json' },
+          signal: AbortSignal.timeout(15000),
+        });
+        if (!res.ok) continue;
+        const data = (await res.json()) as PluginRegistry;
+        if (Array.isArray(data?.plugins) && data.plugins.length > 0) {
+          return { registry: data, source: url };
+        }
+      } catch {
+        /* try next */
+      }
+    }
+
+    const snapshot = this.readLocalSnapshot();
+    if (snapshot?.plugins?.length) {
+      return { registry: snapshot, source: 'snapshot' };
+    }
+    return null;
+  }
+
+  private readLocalSnapshot(): PluginRegistry | null {
+    const candidates = [
+      path.join(__dirname, '..', 'registry.snapshot.json'),
+      path.join(__dirname, '..', '..', 'website', 'public', 'registry.json'),
+    ];
+    for (const file of candidates) {
+      try {
+        if (!fs.existsSync(file)) continue;
+        const data = JSON.parse(fs.readFileSync(file, 'utf8')) as PluginRegistry;
+        if (Array.isArray(data?.plugins) && data.plugins.length > 0) return data;
+      } catch {
+        /* ignore */
+      }
+    }
+    return null;
+  }
+
+  private applyRegistry(registry: PluginRegistry): number {
+    const now = new Date().toISOString();
+    let count = 0;
+    for (const item of registry.plugins) {
+      this.cache.upsertPlugin(this.registryItemToPlugin(item, now));
+      count++;
+    }
+    return count;
+  }
+
+  private registryItemToPlugin(
+    item: RegistryPlugin,
+    cachedAt: string
+  ): Omit<Plugin, 'isInstalled' | 'installedVersion'> {
+    return {
+      id: item.id,
+      source: item.source,
+      name: item.name,
+      description: item.description || '',
+      category: item.category || 'other',
+      author: item.author || '',
+      url: item.url || '',
+      stars: Number(item.stars) || 0,
+      downloads: Number(item.downloads) || 0,
+      version: item.version || '',
+      license: item.license || '',
+      language: item.language || '',
+      topics: item.topics || [],
+      keywords: item.keywords || [],
+      readmeUrl: item.readmeUrl,
+      installCmd: item.installCmd || `dsh plugin --profile web add ${item.installSpec}`,
+      permissionLevel: item.permissionLevel || 'unknown',
+      updatedAt: item.updatedAt,
+      cachedAt,
+    };
+  }
+
+  private async syncFromSearchApis(
+    startTime: number,
+    beforeCount: number,
+    failedSources: string[]
+  ): Promise<SyncResult> {
     if (this.config.github.enabled) {
       let githubSyncId = 0;
       try {
@@ -84,7 +217,6 @@ export class IndexingService implements IIndexingService {
       }
     }
 
-    // 同步 npm
     if (this.config.npm.enabled) {
       let npmSyncId = 0;
       try {
@@ -105,88 +237,48 @@ export class IndexingService implements IIndexingService {
     }
 
     const afterCount = this.cache.getTotalCount();
-    newPlugins = Math.max(0, afterCount - beforeCount);
-    // 粗略估算更新数
-    updatedPlugins = Math.max(0, afterCount - newPlugins);
-
-    this.syncInProgress = false;
-
     return {
       success: failedSources.length === 0,
       totalPlugins: afterCount,
-      newPlugins,
-      updatedPlugins,
+      newPlugins: Math.max(0, afterCount - beforeCount),
+      updatedPlugins: Math.max(0, afterCount - Math.max(0, afterCount - beforeCount)),
       failedSources,
       durationMs: Date.now() - startTime,
       error: failedSources.length > 0 ? `Failed sources: ${failedSources.join(', ')}` : undefined,
     };
   }
 
-  /**
-   * 增量同步（目前简化为全量同步，后续可优化）
-   */
-  async syncIncremental(): Promise<SyncResult> {
-    return this.syncAll();
-  }
-
-  /**
-   * 从 GitHub 同步
-   */
   private async syncFromGitHub(): Promise<number> {
     const repos = await this.githubClient.fetchAllRepos(this.config.github.topic);
     const now = new Date().toISOString();
-
     for (const repo of repos) {
-      const plugin = this.githubRepoToPlugin(repo, now);
-      this.cache.upsertPlugin(plugin);
+      this.cache.upsertPlugin(this.githubRepoToPlugin(repo, now));
     }
-
     return repos.length;
   }
 
-  /**
-   * 从 npm 同步
-   */
   private async syncFromNpm(): Promise<number> {
     const result = await this.npmClient.search(this.config.npm.keyword, 250);
     const now = new Date().toISOString();
     let count = 0;
-
     for (const item of result.objects) {
       const pkg = item.package;
-      // 跳过 GitHub 上已有的（避免重复）
       const githubId = this.extractGitHubIdFromNpm(pkg);
-      if (githubId) {
-        const existing = this.cache.getPlugin(githubId);
-        if (existing) {
-          // 更新 npm 下载量信息
-          continue;
-        }
-      }
-
-      const plugin = this.npmPackageToPlugin(pkg, now);
-      this.cache.upsertPlugin(plugin);
+      if (githubId && this.cache.getPlugin(githubId)) continue;
+      this.cache.upsertPlugin(this.npmPackageToPlugin(pkg, now));
       count++;
     }
-
     return count;
   }
 
-  /**
-   * GitHub 仓库转插件对象
-   */
   private githubRepoToPlugin(repo: GitHubRepo, cachedAt: string): Omit<Plugin, 'isInstalled' | 'installedVersion'> {
     const name = repo.name;
     const description = repo.description || '';
     const topics = repo.topics || [];
     const keywords: string[] = [];
-
     const category = classifyPlugin({ name, description, topics, keywords });
     const permissionLevel = inferRiskLevel({ name, description, topics, keywords });
-
     const pluginId = `github:${repo.full_name}`;
-    const installCmd = `dsh plugin --profile web add github:${repo.full_name}`;
-
     return {
       id: pluginId,
       source: 'github',
@@ -203,30 +295,22 @@ export class IndexingService implements IIndexingService {
       topics,
       keywords,
       readmeUrl: `https://github.com/${repo.full_name}/blob/${repo.default_branch}/README.md`,
-      installCmd,
+      installCmd: `dsh plugin --profile web add github:${repo.full_name}`,
       permissionLevel,
       updatedAt: repo.updated_at,
       cachedAt,
     };
   }
 
-  /**
-   * npm 包转插件对象
-   */
   private npmPackageToPlugin(pkg: NpmPackage, cachedAt: string): Omit<Plugin, 'isInstalled' | 'installedVersion'> {
     const name = pkg.name;
     const description = pkg.description || '';
     const keywords = pkg.keywords || [];
     const topics: string[] = [];
-
     const category = classifyPlugin({ name, description, topics, keywords });
     const permissionLevel = inferRiskLevel({ name, description, topics, keywords });
-
-    const pluginId = `npm:${pkg.name}`;
-    const installCmd = `dsh plugin --profile web add ${pkg.name}`;
-
     return {
-      id: pluginId,
+      id: `npm:${pkg.name}`,
       source: 'npm',
       name,
       description,
@@ -241,28 +325,20 @@ export class IndexingService implements IIndexingService {
       topics,
       keywords,
       readmeUrl: pkg.links.repository || '',
-      installCmd,
+      installCmd: `dsh plugin --profile web add ${pkg.name}`,
       permissionLevel,
       updatedAt: pkg.date,
       cachedAt,
     };
   }
 
-  /**
-   * 从 npm 包信息中提取 GitHub ID
-   */
   private extractGitHubIdFromNpm(pkg: NpmPackage): string | null {
     const repoUrl = pkg.links.repository;
     if (!repoUrl) return null;
-
     const match = repoUrl.match(/github\.com[:/]([^/]+)\/([^/.]+)/);
-    if (match) {
-      return `github:${match[1]}/${match[2]}`;
-    }
+    if (match) return `github:${match[1]}/${match[2]}`;
     return null;
   }
-
-  // ---------- 查询接口 ----------
 
   async search(query: string, options?: SearchOptions): Promise<{ plugins: Plugin[]; total: number }> {
     return this.cache.searchPlugins(query, options || {});
@@ -282,8 +358,6 @@ export class IndexingService implements IIndexingService {
 
   async getDetail(pluginId: string): Promise<PluginDetail | null> {
     const detail = this.cache.getPluginDetail(pluginId);
-
-    // 如果没有 README，尝试拉取
     if (detail && !detail.readme) {
       try {
         const readme = await this.fetchReadme(pluginId);
@@ -295,23 +369,30 @@ export class IndexingService implements IIndexingService {
         console.error('[plugin-market] Failed to fetch README:', error);
       }
     }
-
     return detail;
   }
 
-  /**
-   * 拉取插件 README
-   */
   private async fetchReadme(pluginId: string): Promise<string | null> {
     if (pluginId.startsWith('github:')) {
       const fullName = pluginId.slice('github:'.length);
       const [owner, repo] = fullName.split('/');
-      if (owner && repo) {
-        return this.githubClient.getReadme(owner, repo);
+      if (!owner || !repo) return null;
+      const cdn = `https://cdn.jsdelivr.net/gh/${owner}/${repo}@HEAD/README.md`;
+      try {
+        const res = await fetch(cdn, { signal: AbortSignal.timeout(8000) });
+        if (res.ok) {
+          const text = await res.text();
+          if (text && !text.startsWith("Couldn't find")) return text.slice(0, 20000);
+        }
+      } catch {
+        /* fall through */
       }
-    } else if (pluginId.startsWith('npm:')) {
-      const pkgName = pluginId.slice('npm:'.length);
-      return this.npmClient.getReadme(pkgName);
+      const gh = await this.githubClient.getReadme(owner, repo);
+      return gh ? gh.slice(0, 20000) : null;
+    }
+    if (pluginId.startsWith('npm:')) {
+      const npm = await this.npmClient.getReadme(pluginId.slice('npm:'.length));
+      return npm ? npm.slice(0, 20000) : null;
     }
     return null;
   }

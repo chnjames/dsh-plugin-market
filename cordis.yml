@@ -8,29 +8,29 @@
     - id: plugin-market
       name: dsh-plugin-market
       config:
-        # 数据源配置
+        catalog:
+          fallbackToSearch: true
+          # urls: ["https://dsh-plugin-market.vercel.app/registry.json"]
+
         sources:
           github:
             enabled: true
             topic: "dsh-plugin"
-            # token: "ghp_xxx"        # 可选：GitHub Token，提高 API 速率限制
           npm:
             enabled: true
             keyword: "dsh-plugin"
-            registry: "https://registry.npmjs.org"   # 国内可用 https://registry.npmmirror.com
+            registry: "https://registry.npmjs.org"
 
-        # 缓存配置
         cache:
-          ttl: 21600          # 6 小时（秒）
+          ttl: 21600
           autoRefresh: true
           refreshInterval: 21600
 
-        # UI 配置
         ui:
           defaultSort: "stars"
           defaultView: "grid"
           showRiskLevel: true
-          webPort: 3789       # Web UI 面板端口，设为 0 或 false 禁用
+          webPort: 0          # 调试面板端口；0 关闭（产品入口是 设置 → 插件 → 插件市场）
 
         # 安装配置
         install:
