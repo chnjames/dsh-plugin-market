@@ -15,6 +15,7 @@ import { PluginCache } from './db/cache.js';
 import { IndexingService } from './services/indexing.js';
 import { InstallerService } from './services/installer.js';
 import { PluginMarketWebServer } from './ui/web-server.js';
+import { PluginMarketService } from './remote.js';
 import type { PluginMarketConfig } from './types.js';
 
 /** Cordis plugin name used by loader diagnostics. */
@@ -81,29 +82,11 @@ async function apply(ctx: any, config: Partial<PluginMarketConfig>) {
   );
 
   // ---------- 服务注册 ----------
-  // 通过 ctx.provide 向 Cordis 容器注册服务，供其他插件调用
-  ctx.provide('pluginMarket', {
-    indexing: {
-      syncAll: () => indexing.syncAll(),
-      syncIncremental: () => indexing.syncIncremental(),
-      search: (q: string, opts?: any) => indexing.search(q, opts),
-      getByCategory: (id: string, opts?: any) => indexing.getByCategory(id, opts),
-      getTrending: (limit?: number) => indexing.getTrending(limit),
-      getRecent: (limit?: number) => indexing.getRecent(limit),
-      getDetail: (id: string) => indexing.getDetail(id),
-      getCategories: () => indexing.getCategories(),
-      getCacheStatus: () => indexing.getCacheStatus(),
-    },
-    installer: {
-      install: (id: string, opts?: any) => installer.install(id, opts),
-      uninstall: (id: string, opts?: any) => installer.uninstall(id, opts),
-      update: (id: string, opts?: any) => installer.update(id, opts),
-      getInstalled: () => installer.getInstalled(),
-      isInstalled: (id: string) => installer.isInstalled(id),
-      getStatus: (id: string) => installer.getStatus(id),
-    },
-    config: mergedConfig,
-  });
+  // PluginMarketService extends TypertRemoteService（cordis Service 子类）：
+  // 构造函数自动把自身注册为 `pluginMarket` 服务，同时把标注了 @Remote 的
+  // 方法暴露给浏览器 client（ctx.remote.pluginMarket.*），替换旧的 ctx.provide 对象。
+  const service = new PluginMarketService(ctx, mergedConfig, indexing, installer);
+  void service;
 
   // ---------- 工具注册 ----------
   // DSH ToolDefinition: name/description/parameters + mandatory output + execute(args, exec)

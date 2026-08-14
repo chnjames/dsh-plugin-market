@@ -1,10 +1,20 @@
 {
   "name": "dsh-plugin-market",
-  "version": "0.2.0",
-  "description": "DSH 插件市场 — 在 DSH 内发现、浏览、安装和管理社区插件（DSH 运行时适配版）",
+  "version": "0.3.0",
+  "description": "DSH 插件市场 — 在 DSH 内发现、浏览、安装和管理社区插件（内嵌 UI + 独立 Web UI 双形态）",
   "type": "module",
   "main": "lib/index.js",
   "types": "lib/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./client": {
+      "default": "./lib/client/client.js"
+    },
+    "./package.json": "./package.json"
+  },
   "files": [
     "lib",
     "cordis.yml",
@@ -12,7 +22,7 @@
     "INSTALL_DSH.md"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && node scripts/build-client.mjs",
     "dev": "tsc -p tsconfig.json --watch",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "clean": "rm -rf lib",
@@ -30,14 +40,24 @@
   "dsh": {
     "bundle": {
       "patch": "cordis.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-locale"
+      ]
     }
   },
   "dependencies": {
     "sql.js": "^1.10.3"
   },
+  "peerDependencies": {
+    "@deepseek-ai/dsh-typert-protocol": "^0.1.0-rc.6"
+  },
   "devDependencies": {
-    "typescript": "^5.5.0",
+    "@types/node": "^22.0.0",
     "@types/sql.js": "^1.4.9",
-    "@types/node": "^22.0.0"
+    "typescript": "^5.5.0"
   }
 }
