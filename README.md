@@ -24,6 +24,8 @@ npx @deepseek-ai/dsh plugin --profile web add github:chnjames/dsh-plugin-market
 
 安装后**重启** `dsh web`，打开 **设置 → 插件 → 插件市场**。
 
+![设置 → 插件 → 插件市场](docs/plugin-market-settings.png)
+
 卡片结构：
 
 1. 标题行：名称 · 星标 · 展开
