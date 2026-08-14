@@ -1,0 +1,43 @@
+{
+  "name": "dsh-plugin-market",
+  "version": "0.2.0",
+  "description": "DSH 插件市场 — 在 DSH 内发现、浏览、安装和管理社区插件（DSH 运行时适配版）",
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/index.d.ts",
+  "files": [
+    "lib",
+    "cordis.yml",
+    "README.md",
+    "INSTALL_DSH.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsc -p tsconfig.json --watch",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "clean": "rm -rf lib",
+    "prepare": "npm run build"
+  },
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "plugin-market",
+    "marketplace"
+  ],
+  "author": "dsh-plugin-market",
+  "license": "MIT",
+  "dsh": {
+    "bundle": {
+      "patch": "cordis.yml"
+    }
+  },
+  "dependencies": {
+    "sql.js": "^1.10.3"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.0",
+    "@types/sql.js": "^1.4.9",
+    "@types/node": "^22.0.0"
+  }
+}
