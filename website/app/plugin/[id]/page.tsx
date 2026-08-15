@@ -25,11 +25,11 @@ export default async function PluginPage({ params }: { params: Promise<{ id: str
 
   return (
     <main>
-      <p className="muted">
+      <p className="crumb">
         <Link href="/">目录</Link>
         {cat ? <> / <Link href={`/category/${cat.id}/`}>{cat.name}</Link></> : null}
       </p>
-      <h1 className="section-title" style={{ marginTop: 8 }}>{plugin.name}</h1>
+      <h1 className="page-title">{plugin.name}</h1>
       <p className="lede">{plugin.description || '暂无描述'}</p>
 
       <div className="cmd">
@@ -51,8 +51,12 @@ export default async function PluginPage({ params }: { params: Promise<{ id: str
         <dt>更新</dt><dd>{plugin.updatedAt ? new Date(plugin.updatedAt).toLocaleDateString('zh-CN') : '—'}</dd>
       </dl>
 
-      <h2 className="section-title">说明</h2>
-      <ReadmeFrame plugin={plugin} />
+      <section className="section" aria-labelledby="about-title">
+        <div className="section-head">
+          <h2 id="about-title" className="section-title">说明</h2>
+        </div>
+        <ReadmeFrame plugin={plugin} />
+      </section>
     </main>
   );
 }

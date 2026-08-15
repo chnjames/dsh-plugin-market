@@ -167,7 +167,6 @@ export interface PluginMarketConfig {
     defaultSort: string;
     defaultView: string;
     showRiskLevel: boolean;
-    webPort?: number;
   };
   install: {
     defaultProfile: string;

@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { CATEGORIES } from '@/lib/types';
 import { loadRegistry, categoryCounts } from '@/lib/registry';
@@ -23,8 +24,10 @@ export default async function CategoryPage({ params }: { params: Promise<{ id: s
 
   return (
     <main>
-      <p className="muted">{cat.nameEn}</p>
-      <h1 className="section-title" style={{ marginTop: 8 }}>{cat.name}</h1>
+      <p className="crumb">
+        <Link href="/">目录</Link> / {cat.nameEn}
+      </p>
+      <h1 className="page-title">{cat.name}</h1>
       <p className="lede">{counts[cat.id] || 0} 个插件</p>
       <ul className="card-grid">
         {plugins.map((p) => (

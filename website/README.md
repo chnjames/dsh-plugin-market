@@ -1,6 +1,9 @@
 # DSH 插件市场网站
 
-Next.js 静态站，部署到 Vercel。数据来自 `public/registry.json`（由仓库根目录 `npm run build:registry` / GitHub Actions 生成）。
+面向所有人的公开目录站（Next.js 静态导出），部署到 Vercel。  
+数据来自 `public/registry.json`（仓库根目录 `npm run build:registry` / GitHub Actions 生成）。
+
+本站只负责**浏览与复制安装命令**；真正安装在本机 DSH「设置 → 插件 → 插件市场」完成。
 
 ## 本地
 

@@ -30,7 +30,6 @@
           defaultSort: "stars"
           defaultView: "grid"
           showRiskLevel: true
-          webPort: 0          # 调试面板端口；0 关闭（产品入口是 设置 → 插件 → 插件市场）
 
         # 安装配置
         install:

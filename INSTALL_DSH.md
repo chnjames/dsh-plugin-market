@@ -20,11 +20,9 @@ npx 用户把 `dsh` 换成 `npx @deepseek-ai/dsh`。
 - 点标题展开 README 摘要与仓库 id
 - 安装 / 卸载前会二次确认（走官方 `dsh plugin` CLI）
 
-独立调试面板（`ui.webPort`）默认关闭。需要时设为 `3789`。
-
 ## 公开网站
 
-浏览目录、复制安装命令：部署 [`website/`](website/) 到 Vercel（Root Directory = `website`）。  
+给所有人浏览目录、复制安装命令：部署 [`website/`](website/) 到 Vercel（Root Directory = `website`）。  
 插件运行时会拉取该站的 `/registry.json`。
 
 ## 手动挂载

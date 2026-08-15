@@ -25,7 +25,7 @@ Host 侧 `PluginMarketService` 继承 `TypertRemoteService`，`super(ctx, 'plugi
 
 目录拉取顺序：Vercel → jsDelivr → GitHub raw → 包内 `lib/registry.snapshot.json` → 最后才回落到本机 GitHub/npm 搜索。
 
-调试 HTTP 面板 `src/ui/web-server.ts` 仍保留，默认 `ui.webPort: 0` **关闭**。产品入口不是侧栏按钮，也不是独立站点上的「一键安装」。
+产品面只有两处：**Vercel 公开站**（所有人浏览）与 **设置 → 插件 → 插件市场**（本机安装）。独立 `localhost:3789` HTTP 面板已删除。
 
 ---
 
@@ -164,7 +164,6 @@ Client 里的 `excerptReadme` 与 Host `src/utils/readme.ts` 是两份相近实�
 |---|---|
 | 无单元测试 | 分类器、README 摘要、Remote 编解码都没有自动回归 |
 | 双份 excerpt | Client JS 与 `src/utils/readme.ts` 会再漂移 |
-| `src/ui/web-server.ts` | 旧独立面板仍在树里，默认关闭，和产品 UI 重复 |
 | `src/shared/*` 与 `src/utils/*` | 分类/目录工具可能有历史重复路径 |
 | npm 下载量 | 目录里多为 0 |
 | 无更新检测 | 只能卸了再装 |
@@ -178,7 +177,7 @@ Client 里的 `excerptReadme` 与 Host `src/utils/readme.ts` 是两份相近实�
 - 目录是公开索引，**不构成推荐**
 - 启发式**不能**替代你自己读仓库
 
-XSS：设置 Tab 用 React 文本节点渲染摘要，不 `dangerouslySetInnerHTML`。旧 `web-server.ts` 若被手动打开，仍是 HTML 字符串拼接（有 `escapeHtml`）。
+XSS：设置 Tab 用 React 文本节点渲染摘要，不 `dangerouslySetInnerHTML`。
 
 ---
 

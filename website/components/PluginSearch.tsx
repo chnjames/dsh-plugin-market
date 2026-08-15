@@ -23,14 +23,15 @@ export function PluginSearch({ plugins }: { plugins: RegistryPlugin[] }) {
   return (
     <section className="search-block">
       <label className="search-label" htmlFor="q">
-        搜索目录
+        名称、作者、topic…
       </label>
       <input
         id="q"
         className="search-input"
         value={q}
         onChange={(e) => setQ(e.target.value)}
-        placeholder="名称、作者、topic…"
+        placeholder="例如 vision、theme、dsh-…"
+        autoComplete="off"
       />
       <ul className="card-grid">
         {filtered.map((p) => (

@@ -14,7 +14,6 @@ import os from 'node:os';
 import { PluginCache } from './db/cache.js';
 import { IndexingService } from './services/indexing.js';
 import { InstallerService } from './services/installer.js';
-import { PluginMarketWebServer } from './ui/web-server.js';
 import { PluginMarketService } from './remote.js';
 import { DEFAULT_CATALOG_URLS } from './utils/registry.js';
 import { excerptReadmeText } from './utils/readme.js';
@@ -51,7 +50,6 @@ const DEFAULT_CONFIG: PluginMarketConfig = {
     defaultSort: 'stars',
     defaultView: 'grid',
     showRiskLevel: true,
-    webPort: 0,
   },
   install: {
     defaultProfile: 'web',
@@ -64,12 +62,12 @@ const DEFAULT_CONFIG: PluginMarketConfig = {
  * DSH 插件市场插件入口（适配 DSH 运行时）
  *
  * 提供：
- * - 插件索引服务（从 GitHub/npm 拉取插件元数据）
- * - 插件安装服务（调用 dsh plugin CLI）
- * - 本地缓存（SQLite）
- * - HTTP API 端点（供前端 UI 调用）
- * - Web UI 面板（独立端口）
+ * - 共享目录拉取与本地缓存（sql.js）
+ * - Typert Remote（设置 → 插件 → 插件市场 Tab）
+ * - 官方 CLI 安装 / 卸载
  * - Agent 工具（plugin_market_*）
+ *
+ * 公开浏览面是 Vercel 上的 website/，本机不启独立 HTTP 面板。
  */
 async function apply(ctx: any, config: Partial<PluginMarketConfig>) {
   // 合并配置
@@ -110,7 +108,6 @@ async function apply(ctx: any, config: Partial<PluginMarketConfig>) {
 
   // ---------- 生命周期 ----------
   let refreshTimer: ReturnType<typeof setInterval> | undefined;
-  let webServer: PluginMarketWebServer | undefined;
 
   // 启动时初始化数据库并后台同步插件索引
   try {
@@ -149,20 +146,6 @@ async function apply(ctx: any, config: Partial<PluginMarketConfig>) {
     }
 
     void installer.refreshInstalledFlags();
-
-    // 启动调试用 Web UI 服务器（默认关闭；ui.webPort > 0 才开）
-    const webPort = mergedConfig.ui?.webPort;
-    if (webPort) {
-      webServer = new PluginMarketWebServer({
-        port: webPort,
-        config: mergedConfig,
-        cache,
-        indexing,
-        installer,
-      });
-      await webServer.start();
-      ctx.logger.info(`[plugin-market] Web UI server started on port ${webPort}`);
-    }
   } catch (error) {
     ctx.logger.error('[plugin-market] Startup failed:', error);
   }
@@ -174,7 +157,6 @@ async function apply(ctx: any, config: Partial<PluginMarketConfig>) {
       for (const dispose of toolDisposers) {
         try { dispose(); } catch { /* ignore */ }
       }
-      try { if (webServer) void webServer.stop(); } catch { /* ignore */ }
       try { cache.close(); } catch { /* ignore */ }
       ctx.logger.info('[plugin-market] Shutting down');
     };

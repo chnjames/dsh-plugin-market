@@ -76,21 +76,22 @@ pnpm add "file:/absolute/path/to/dsh-plugin-market"
           fallbackToSearch: true
           # urls: ["https://your-domain/registry.json"]
         ui:
-          webPort: 0          # 调试用独立 HTTP 面板；0 = 关闭（产品入口是设置 Tab）
+          showRiskLevel: true
         install:
           defaultProfile: "web"
           confirmBeforeInstall: true
-          # dshCommand: "npx @deepseek-ai/dsh"   # npx 运行 DSH 时取消注释
+          # dshCommand: "npx @deepseek-ai/dsh"
 ```
 
 ## 架构
 
 ```
-GitHub Actions ──► registry.json ──► Vercel 网站（浏览 / CORS）
+GitHub Actions ──► registry.json ──► Vercel 网站（所有人浏览 / CORS）
                          └──► DSH host（sql.js 缓存 + Typert Remote）
-                                    └──► 设置 → 插件 → 插件市场 Tab
+                                    └──► 设置 → 插件 → 插件市场 Tab（本机安装）
 ```
 
+公开浏览面只有 Vercel 上的 `website/`；本机插件**不再**启独立 HTTP 面板。
 | 层 | 说明 |
 |---|---|
 | Host | `PluginMarketService`（`@Remote`），安装方法名为 `installPlugin` |
