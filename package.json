@@ -18,8 +18,7 @@
   "files": [
     "lib",
     "cordis.yml",
-    "README.md",
-    "INSTALL_DSH.md"
+    "README.md"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json && node scripts/build-client.mjs",
