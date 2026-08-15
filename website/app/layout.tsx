@@ -1,24 +1,27 @@
 import type { Metadata } from 'next';
-import { Space_Grotesk, IBM_Plex_Sans, IBM_Plex_Mono } from 'next/font/google';
-import Link from 'next/link';
+import { Montserrat, DM_Sans, Fragment_Mono } from 'next/font/google';
+import { loadRegistry } from '@/lib/registry';
+import { Providers } from '@/components/Providers';
+import { SiteShell } from '@/components/SiteShell';
 import './globals.css';
 
-const display = Space_Grotesk({
+const display = Montserrat({
   subsets: ['latin'],
+  weight: ['500', '600', '700'],
   variable: '--font-display',
   display: 'swap',
 });
 
-const body = IBM_Plex_Sans({
+const body = DM_Sans({
   subsets: ['latin'],
   weight: ['400', '500', '600'],
   variable: '--font-body',
   display: 'swap',
 });
 
-const mono = IBM_Plex_Mono({
+const mono = Fragment_Mono({
   subsets: ['latin'],
-  weight: ['400', '500'],
+  weight: ['400'],
   variable: '--font-mono',
   display: 'swap',
 });
@@ -28,31 +31,32 @@ export const metadata: Metadata = {
     default: 'DSH 插件市场',
     template: '%s · DSH 插件市场',
   },
-  description: 'DeepSeek Harness 社区插件目录。浏览、复制安装命令；在 DSH「设置 → 插件 → 插件市场」里一键安装。',
+  description:
+    'DeepSeek Harness 社区插件目录。浏览、复制安装命令；在 DSH「设置 → 插件 → 插件市场」里确认安装。',
+  icons: {
+    icon: [{ url: '/favicon.svg', type: 'image/svg+xml' }],
+  },
+  openGraph: {
+    title: 'DSH 插件市场',
+    description: 'DeepSeek Harness 社区插件目录',
+    type: 'website',
+  },
 };
 
+const themeInitScript = `(function(){try{var k='dsh-market-theme';var s=localStorage.getItem(k);var t=(s==='light'||s==='dark')?s:(window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');document.documentElement.setAttribute('data-theme',t);}catch(e){document.documentElement.setAttribute('data-theme','light');}})();`;
+
 export default function RootLayout({ children }: { children: React.ReactNode }) {
+  const registry = loadRegistry();
+
   return (
-    <html lang="zh-CN">
+    <html lang="zh-CN" suppressHydrationWarning>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
+      </head>
       <body className={`${display.variable} ${body.variable} ${mono.variable}`}>
-        <div className="wrap">
-          <header className="site-header">
-            <Link className="brand" href="/">
-              DSH <span>插件市场</span>
-            </Link>
-            <nav className="nav" aria-label="站点">
-              <Link href="/">目录</Link>
-              <a href="https://github.com/deepseek-ai/deepseek-harness" rel="noreferrer">DeepSeek Harness</a>
-              <a href="https://github.com/chnjames/dsh-plugin-market" rel="noreferrer">本仓库</a>
-            </nav>
-          </header>
-          {children}
-          <footer className="site-footer">
-            公开索引来自 GitHub topic <code>dsh-plugin</code> 与 npm keyword。
-            本站只负责浏览与复制命令；安装在 DSH「设置 → 插件 → 插件市场」完成。
-            安装第三方插件即在本机执行其代码，请自行评估。
-          </footer>
-        </div>
+        <Providers>
+          <SiteShell generatedAt={registry.generatedAt}>{children}</SiteShell>
+        </Providers>
       </body>
     </html>
   );

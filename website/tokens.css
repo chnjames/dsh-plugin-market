@@ -1,0 +1,38 @@
+:root {
+  --color-paper: oklch(98.5% 0.004 250);
+  --color-paper-2: oklch(96% 0.006 250);
+  --color-ink: oklch(18% 0.01 250);
+  --color-ink-2: oklch(45% 0.015 250);
+  --color-rule: oklch(88% 0.01 255);
+  --color-rule-2: oklch(80% 0.015 255);
+  --color-accent: oklch(55% 0.16 250);
+  --color-focus: oklch(58% 0.17 250);
+  --color-cmd: oklch(14% 0.01 250);
+  --color-cmd-ink: oklch(96% 0.005 250);
+  --color-cmd-muted: oklch(70% 0.01 250);
+
+  --font-display: "Montserrat", "Segoe UI", sans-serif;
+  --font-body: "DM Sans", "Segoe UI", "PingFang SC", sans-serif;
+  --font-mono: "Fragment Mono", ui-monospace, monospace;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+  --space-8: 72px;
+
+  --text-xs: 12px;
+  --text-sm: 13px;
+  --text-md: 15px;
+  --text-lg: 17px;
+  --text-xl: 24px;
+  --text-display: clamp(2rem, 4vw, 2.75rem);
+
+  --radius: 10px;
+  --radius-pill: 999px;
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --dur: 160ms;
+}

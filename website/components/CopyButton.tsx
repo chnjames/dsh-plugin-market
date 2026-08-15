@@ -1,9 +1,11 @@
 'use client';
 
 import { useState } from 'react';
+import { useI18n } from '@/lib/i18n';
 
-export function CopyButton({ text }: { text: string }) {
+export function CopyButton({ text, label }: { text: string; label?: string }) {
   const [copied, setCopied] = useState(false);
+  const { t } = useI18n();
 
   async function onCopy() {
     try {
@@ -17,7 +19,7 @@ export function CopyButton({ text }: { text: string }) {
 
   return (
     <button type="button" className="copy-btn" onClick={onCopy}>
-      {copied ? '已复制' : '复制命令'}
+      {copied ? t('copy.done') : label || t('copy.label')}
     </button>
   );
 }

@@ -26,6 +26,13 @@ export function trending(plugins: RegistryPlugin[], limit = 12): RegistryPlugin[
   return [...plugins].sort((a, b) => b.stars - a.stars).slice(0, limit);
 }
 
+export function recentlyUpdated(plugins: RegistryPlugin[], limit = 12): RegistryPlugin[] {
+  return [...plugins]
+    .filter((p) => Boolean(p.updatedAt))
+    .sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)))
+    .slice(0, limit);
+}
+
 export function findPlugin(plugins: RegistryPlugin[], id: string): RegistryPlugin | undefined {
   return plugins.find((p) => p.id === id);
 }
