@@ -2,13 +2,83 @@
 // DSH Plugin Market - DSH CLI Wrapper
 // ============================================================
 
-import { execFile } from 'node:child_process';
+import crossSpawn from 'cross-spawn';
 import type { InstallResult, UninstallResult } from '../types.js';
 
 function winBin(cmd: string): string {
   if (process.platform !== 'win32') return cmd;
   if (cmd === 'dsh' || cmd === 'npx' || cmd === 'npm' || cmd === 'pnpm') return `${cmd}.cmd`;
   return cmd;
+}
+
+interface RunResult {
+  stdout: string;
+  stderr: string;
+  exitCode: number;
+}
+
+/**
+ * Run a CLI and collect its output.
+ *
+ * `execFile` cannot start a `.cmd` / `.bat` shim on Windows: since the fix for
+ * CVE-2024-27980 (Node 18.20.2 / 20.12.2 / 21.7.3+), spawning a batch file
+ * without a shell throws `spawn EINVAL`. `winBin()` deliberately hands us
+ * `dsh.cmd` / `npx.cmd`, so every CLI interaction fails there. cross-spawn
+ * keeps `shell: false` and routes those shims through `cmd.exe` with quoted
+ * arguments, which is the only way to start them without opening up command
+ * injection through plugin specs.
+ */
+function run(cmd: string, args: string[], timeoutMs: number, maxBuffer: number): Promise<RunResult> {
+  return new Promise((resolve) => {
+    let stdout = '';
+    let stderr = '';
+    let settled = false;
+
+    const child = crossSpawn(cmd, args, { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+
+    const finish = (exitCode: number): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      // A killed `cmd.exe` shim can leave the inherited pipes open; release
+      // them so the host process is not held alive after a timeout.
+      child.stdout?.destroy();
+      child.stderr?.destroy();
+      child.removeAllListeners();
+      child.unref();
+      resolve({ stdout, stderr, exitCode });
+    };
+
+    const timer = setTimeout(() => {
+      child.kill();
+      finish(1);
+    }, timeoutMs);
+    timer.unref();
+
+    if (child.stdout) {
+      child.stdout.setEncoding('utf8');
+      child.stdout.on('data', (chunk: string) => {
+        stdout += chunk;
+        if (stdout.length > maxBuffer) {
+          child.kill();
+          finish(1);
+        }
+      });
+    }
+    if (child.stderr) {
+      child.stderr.setEncoding('utf8');
+      child.stderr.on('data', (chunk: string) => {
+        stderr += chunk;
+        if (stderr.length > maxBuffer) {
+          child.kill();
+          finish(1);
+        }
+      });
+    }
+
+    child.on('error', () => finish(1));
+    child.on('close', (code) => finish(code ?? 1));
+  });
 }
 
 export class DshCliClient {
@@ -44,11 +114,8 @@ export class DshCliClient {
   }
 
   private async checkCommand(cmd: string, args: string[]): Promise<boolean> {
-    return new Promise((resolve) => {
-      execFile(cmd, args, { timeout: 15000, maxBuffer: 1024 * 1024, windowsHide: true }, (error) => {
-        resolve(!error);
-      });
-    });
+    const { exitCode } = await run(cmd, args, 15000, 1024 * 1024);
+    return exitCode === 0;
   }
 
   private resolveExec(): { cmd: string; prefix: string[] } {
@@ -64,21 +131,7 @@ export class DshCliClient {
   private async exec(args: string[], timeoutMs: number = 60000): Promise<{ stdout: string; stderr: string; exitCode: number }> {
     const { cmd, prefix } = this.resolveExec();
     const actualArgs = [...prefix, ...args];
-
-    return new Promise((resolve) => {
-      execFile(
-        cmd,
-        actualArgs,
-        { timeout: timeoutMs, maxBuffer: 10 * 1024 * 1024, windowsHide: true },
-        (error, stdout, stderr) => {
-          resolve({
-            stdout: stdout || '',
-            stderr: stderr || '',
-            exitCode: error?.code ? Number(error.code) : error ? 1 : 0,
-          });
-        }
-      );
-    });
+    return run(cmd, actualArgs, timeoutMs, 10 * 1024 * 1024);
   }
 
   async install(pluginSpec: string, profile: string = 'web'): Promise<InstallResult> {

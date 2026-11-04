@@ -53,12 +53,14 @@
     }
   },
   "dependencies": {
+    "cross-spawn": "^7.0.6",
     "sql.js": "^1.10.3"
   },
   "peerDependencies": {
     "@deepseek-ai/dsh-typert-protocol": "^0.1.0-rc.6"
   },
   "devDependencies": {
+    "@types/cross-spawn": "^6.0.6",
     "@types/node": "^22.0.0",
     "@types/sql.js": "^1.4.9",
     "typescript": "^5.5.0"
